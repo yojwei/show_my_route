@@ -205,6 +205,37 @@
             return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} +08:00`;
         }
 
+        function analyzeRoundTrip(points) {
+            if (!Array.isArray(points) || points.length < 2) {
+                return {
+                    alreadyRoundTrip: false,
+                    routeLengthKm: 0,
+                    startEndDistanceKm: Infinity,
+                    closureThresholdKm: 0
+                };
+            }
+
+            const routeLengthKm = turf.length(turf.lineString(points), { units: 'kilometers' });
+            const startEndDistanceKm = turf.distance(
+                turf.point(points[0]),
+                turf.point(points[points.length - 1]),
+                { units: 'kilometers' }
+            );
+
+            const gpsDriftFloorKm = 0.06;
+            const closureRatio = 0.02;
+            const minRouteLengthKm = 0.2;
+            const closureThresholdKm = Math.max(gpsDriftFloorKm, routeLengthKm * closureRatio);
+            const alreadyRoundTrip = routeLengthKm >= minRouteLengthKm && startEndDistanceKm <= closureThresholdKm;
+
+            return {
+                alreadyRoundTrip,
+                routeLengthKm,
+                startEndDistanceKm,
+                closureThresholdKm
+            };
+        }
+
         async function loadRouteFromGpx(path) {
             let response;
             try {
@@ -250,10 +281,18 @@
 
             yushanWaypoints = points;
 
-            fullRouteCoords = [...yushanWaypoints];
-            for (let i = yushanWaypoints.length - 2; i >= 0; i--) {
-                fullRouteCoords.push(yushanWaypoints[i]);
+            const roundTripStats = analyzeRoundTrip(yushanWaypoints);
+            if (roundTripStats.alreadyRoundTrip) {
+                fullRouteCoords = [...yushanWaypoints];
+            } else {
+                fullRouteCoords = [...yushanWaypoints];
+                for (let i = yushanWaypoints.length - 2; i >= 0; i--) {
+                    fullRouteCoords.push(yushanWaypoints[i]);
+                }
             }
+            console.info(
+                `[GPX_ROUTE_MODE] alreadyRoundTrip=${roundTripStats.alreadyRoundTrip} startEndKm=${roundTripStats.startEndDistanceKm.toFixed(3)} routeLengthKm=${roundTripStats.routeLengthKm.toFixed(3)} thresholdKm=${roundTripStats.closureThresholdKm.toFixed(3)}`
+            );
 
             routeLine = turf.lineString(fullRouteCoords);
             totalDistance = turf.length(routeLine, { units: 'kilometers' });
