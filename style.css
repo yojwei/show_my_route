@@ -1,0 +1,19 @@
+body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #111;
+}
+
+#map {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 100%;
+}
+
+/* 隱藏 MapLibre 預設的 UI 元件 */
+.maplibregl-ctrl-top-right,
+.maplibregl-ctrl-bottom-right {
+    display: none !important;
+}

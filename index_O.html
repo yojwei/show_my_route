@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,12 +8,36 @@
     <!-- 使用在沙盒 iframe 中相容性極佳的 MapLibre GL JS v2.4.0 -->
     <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
     <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
+    <!-- Turf.js (用於地理空間計算，如距離、方向、內插點) -->
     <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+    <!-- Tailwind CSS (用於快速排版) -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="style.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #111;
+        }
+
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+
+        /* 隱藏 MapLibre 預設的 UI 元件以獲得更沉浸的體驗 */
+        .maplibregl-ctrl-top-right,
+        .maplibregl-ctrl-bottom-right {
+            display: none !important;
+        }
+    </style>
 </head>
+
 <body class="text-white font-sans">
 
+    <!-- 地圖容器 -->
     <div id="map"></div>
 
     <!-- 儀表板與控制列 (直接顯示) -->
@@ -26,7 +51,8 @@
                 <div class="grid grid-cols-2 gap-6">
                     <div>
                         <p class="text-xs text-gray-400 uppercase tracking-widest">距離</p>
-                        <p class="text-2xl font-mono font-bold"><span id="distance-display">0.0</span> <span class="text-sm font-sans">km</span></p>
+                        <p class="text-2xl font-mono font-bold"><span id="distance-display">0.0</span> <span
+                                class="text-sm font-sans">km</span></p>
                     </div>
                     <div>
                         <p class="text-xs text-gray-400 uppercase tracking-widest">模擬海拔</p>
@@ -293,4 +319,5 @@
 
     </script>
 </body>
+
 </html>
