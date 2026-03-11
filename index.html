@@ -485,7 +485,16 @@
             };
         }
 
-        function applyLoadedRoute({ points, gpxTrackName, gpxMetadataTime }) {
+        function getFileNameWithoutExtension(fileName) {
+            const normalizedName = typeof fileName === 'string' ? fileName.trim() : '';
+            if (!normalizedName) return '';
+
+            const dotIndex = normalizedName.lastIndexOf('.');
+            if (dotIndex <= 0) return normalizedName;
+            return normalizedName.slice(0, dotIndex);
+        }
+
+        function applyLoadedRoute({ points, gpxTrackName, gpxMetadataTime, fallbackRouteTitle = defaultRouteTitleText }) {
             yushanWaypoints = points;
 
             const roundTripStats = analyzeRoundTrip(yushanWaypoints);
@@ -509,7 +518,7 @@
             }
 
             if (routeTitleEl) {
-                routeTitleEl.textContent = gpxTrackName || defaultRouteTitleText;
+                routeTitleEl.textContent = gpxTrackName || fallbackRouteTitle || defaultRouteTitleText;
             }
             if (routeDescriptionEl) {
                 routeDescriptionEl.textContent = gpxMetadataTime || defaultRouteDescriptionText;
@@ -519,7 +528,11 @@
         async function loadRouteFromGpx(source) {
             const gpxText = await readGpxTextFromSource(source);
             const parsedRoute = parseGpxRoute(gpxText);
-            applyLoadedRoute(parsedRoute);
+            const isFileObject = typeof File !== 'undefined' && source instanceof File;
+            const fallbackRouteTitle = isFileObject
+                ? (getFileNameWithoutExtension(source.name) || defaultRouteTitleText)
+                : defaultRouteTitleText;
+            applyLoadedRoute({ ...parsedRoute, fallbackRouteTitle });
         }
 
         function ensureRouteAndPointLayers() {
