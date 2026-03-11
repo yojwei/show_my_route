@@ -116,6 +116,15 @@
         let routeReady = false;
         let mapReady = false;
         let pointSourceReady = false;
+        let terrainReady = false;
+        let terrainFallbackActive = false;
+        let terrainSourceLoaded = false;
+        let terrainIdleStable = false;
+        let terrainReadyTimeoutId;
+        let terrainSourceDataListener;
+        let terrainIdleListener;
+        let pendingUploadAutoPlayFileName = '';
+        const TERRAIN_READY_TIMEOUT_MS = 5000;
 
         const distanceDisplay = document.getElementById('distance-display');
         const elevationDisplay = document.getElementById('elevation-display');
@@ -133,10 +142,155 @@
             return Boolean(map && map.getSource && map.getSource('point'));
         }
 
+        function clearTerrainReadyTimeout() {
+            if (terrainReadyTimeoutId) {
+                clearTimeout(terrainReadyTimeoutId);
+                terrainReadyTimeoutId = undefined;
+            }
+        }
+
+        function safelyIsTerrainSourceLoaded() {
+            if (!map || !mapReady || typeof map.isSourceLoaded !== 'function') return false;
+
+            try {
+                return Boolean(map.isSourceLoaded('terrain-source'));
+            } catch (err) {
+                console.warn('[TERRAIN_SOURCE_CHECK_FAIL] 無法確認 terrain-source 載入狀態', err);
+                return false;
+            }
+        }
+
+        function tryStartPendingUploadAutoPlay(reason = 'unknown') {
+            if (!pendingUploadAutoPlayFileName) return false;
+
+            pointSourceReady = hasPointSource();
+            const canPlay = updatePlayAvailability();
+            if (!canPlay) {
+                console.info('[AUTO_PLAY_WAIT]', reason, {
+                    routeReady,
+                    mapReady,
+                    pointSourceReady,
+                    terrainReady,
+                    terrainFallbackActive
+                });
+                return false;
+            }
+
+            const uploadFileName = pendingUploadAutoPlayFileName;
+            const started = startPlayback('upload');
+            if (started) {
+                pendingUploadAutoPlayFileName = '';
+                setUploadStatus(`載入成功：${uploadFileName}，已自動播放`, 'success');
+                return true;
+            }
+
+            return false;
+        }
+
+        function detachTerrainReadinessListeners() {
+            if (!map) return;
+
+            if (terrainSourceDataListener) {
+                map.off('sourcedata', terrainSourceDataListener);
+                terrainSourceDataListener = undefined;
+            }
+
+            if (terrainIdleListener) {
+                map.off('idle', terrainIdleListener);
+                terrainIdleListener = undefined;
+            }
+        }
+
+        function markTerrainReady(reason = 'unknown') {
+            if (terrainReady) return;
+
+            terrainReady = true;
+            terrainFallbackActive = false;
+            clearTerrainReadyTimeout();
+            console.info('[TERRAIN_READY]', reason, {
+                terrainSourceLoaded,
+                terrainIdleStable
+            });
+            updatePlayAvailability();
+            tryStartPendingUploadAutoPlay(`terrain-ready:${reason}`);
+        }
+
+        function activateTerrainFallback(reason = 'timeout') {
+            if (terrainReady || terrainFallbackActive) return;
+
+            terrainFallbackActive = true;
+            clearTerrainReadyTimeout();
+            console.warn('[TERRAIN_FALLBACK] 地形載入逾時，啟用可播放降級模式', {
+                reason,
+                terrainSourceLoaded,
+                terrainIdleStable
+            });
+            setUploadStatus('地形載入較慢，已啟用可播放降級模式', 'loading');
+            updatePlayAvailability();
+            tryStartPendingUploadAutoPlay(`terrain-fallback:${reason}`);
+        }
+
+        function evaluateTerrainReadiness(reason = 'recheck') {
+            if (!map || !mapReady) return;
+
+            const sourceLoaded = safelyIsTerrainSourceLoaded();
+            if (sourceLoaded && !terrainSourceLoaded) {
+                terrainSourceLoaded = true;
+                console.info('[TERRAIN_SOURCE_LOADED]', reason);
+            }
+
+            if (terrainSourceLoaded && terrainIdleStable) {
+                markTerrainReady(reason);
+                return;
+            }
+
+            updatePlayAvailability();
+        }
+
+        function resetTerrainReadiness(reason = 'reset') {
+            clearTerrainReadyTimeout();
+            terrainReady = false;
+            terrainFallbackActive = false;
+            terrainSourceLoaded = false;
+            terrainIdleStable = false;
+            console.info('[TERRAIN_RESET]', reason);
+            updatePlayAvailability();
+        }
+
+        function startTerrainReadinessMonitor(reason = 'map-load') {
+            if (!map) return;
+
+            detachTerrainReadinessListeners();
+            resetTerrainReadiness(reason);
+
+            terrainSourceDataListener = (event) => {
+                if (!event || event.sourceId !== 'terrain-source') return;
+
+                if (event.isSourceLoaded) {
+                    terrainSourceLoaded = true;
+                }
+                evaluateTerrainReadiness(`sourcedata:${reason}`);
+            };
+
+            terrainIdleListener = () => {
+                terrainIdleStable = true;
+                evaluateTerrainReadiness(`idle:${reason}`);
+            };
+
+            map.on('sourcedata', terrainSourceDataListener);
+            map.on('idle', terrainIdleListener);
+            evaluateTerrainReadiness(`monitor-start:${reason}`);
+
+            terrainReadyTimeoutId = window.setTimeout(() => {
+                activateTerrainFallback(`${reason}:timeout-${TERRAIN_READY_TIMEOUT_MS}ms`);
+            }, TERRAIN_READY_TIMEOUT_MS);
+        }
+
         function updatePlayAvailability() {
             const canPlay = routeReady
                 && mapReady
                 && pointSourceReady
+                && (terrainReady || terrainFallbackActive)
                 && Boolean(routeLine)
                 && Number.isFinite(totalDistance)
                 && totalDistance > 0;
@@ -473,6 +627,7 @@
             ensureRouteAndPointLayers();
             pointSourceReady = hasPointSource();
             moveCameraToRouteStart();
+            evaluateTerrainReadiness('sync-route');
             updatePlayAvailability();
         }
 
@@ -485,6 +640,8 @@
                     routeReady,
                     mapReady,
                     pointSourceReady,
+                    terrainReady,
+                    terrainFallbackActive,
                     hasRouteLine: Boolean(routeLine),
                     totalDistance
                 });
@@ -493,6 +650,9 @@
 
             if (currentDistance >= totalDistance) {
                 currentDistance = 0;
+            }
+            if (trigger !== 'upload' && pendingUploadAutoPlayFileName) {
+                pendingUploadAutoPlayFileName = '';
             }
             isPlaying = true;
             lastTime = 0;
@@ -505,7 +665,8 @@
         function initMap() {
             mapReady = false;
             pointSourceReady = false;
-            updatePlayAvailability();
+            detachTerrainReadinessListeners();
+            resetTerrainReadiness('map-init');
 
             try {
                 map = new maplibregl.Map({
@@ -550,15 +711,18 @@
                 map.on('load', () => {
                     try {
                         mapReady = true;
+                        startTerrainReadinessMonitor('map-load');
                         ensureRouteAndPointLayers();
                         resetPlaybackState();
                         pointSourceReady = hasPointSource();
                         moveCameraToRouteStart();
                         updatePlayAvailability();
+                        tryStartPendingUploadAutoPlay('map-load');
                     } catch (err) {
                         mapReady = false;
                         pointSourceReady = false;
-                        updatePlayAvailability();
+                        detachTerrainReadinessListeners();
+                        resetTerrainReadiness('map-load-failed');
                         console.error('地圖載入流程失敗（控制已停用）:', err, {
                             hasRouteLine: Boolean(routeLine),
                             routeCoordsLength: fullRouteCoords.length
@@ -568,7 +732,8 @@
             } catch (err) {
                 mapReady = false;
                 pointSourceReady = false;
-                updatePlayAvailability();
+                detachTerrainReadinessListeners();
+                resetTerrainReadiness('map-init-failed');
                 console.error("地圖初始化失敗:", err);
                 alert("在目前的沙盒預覽環境中載入地圖失敗，但此程式碼在您真實的伺服器上可以正常運作。");
             }
@@ -612,7 +777,9 @@
                     totalDistance,
                     pointSourceReady,
                     routeReady,
-                    mapReady
+                    mapReady,
+                    terrainReady,
+                    terrainFallbackActive
                 });
                 updatePlayAvailability();
                 return;
@@ -680,18 +847,22 @@
                 routeReady = true;
                 resetPlaybackState();
                 syncRouteToMap();
-                const autoStarted = startPlayback('upload');
-                setUploadStatus(
-                    autoStarted
-                        ? `載入成功：${file.name}，已自動播放`
-                        : `載入成功：${file.name}，可手動播放`,
-                    'success'
-                );
+                if (mapReady) {
+                    startTerrainReadinessMonitor('upload-reload');
+                }
+                pendingUploadAutoPlayFileName = file.name;
+                const autoStarted = tryStartPendingUploadAutoPlay('upload-complete');
+                if (!autoStarted) {
+                    setUploadStatus(`載入成功：${file.name}，等待地形就緒後自動播放`, 'loading');
+                }
             } catch (err) {
+                pendingUploadAutoPlayFileName = '';
                 console.error('上傳 GPX 失敗（狀態已保持穩定）:', err, {
                     routeReady,
                     mapReady,
-                    pointSourceReady
+                    pointSourceReady,
+                    terrainReady,
+                    terrainFallbackActive
                 });
                 setUploadStatus(`載入失敗：${err.message}`, 'error');
                 updatePlayAvailability();
@@ -716,6 +887,9 @@
                 routeReady = false;
                 mapReady = false;
                 pointSourceReady = false;
+                pendingUploadAutoPlayFileName = '';
+                detachTerrainReadinessListeners();
+                resetTerrainReadiness('bootstrap-failed');
                 isPlaying = false;
                 toggleButtons();
                 updatePlayAvailability();
@@ -724,6 +898,8 @@
                     routeReady,
                     mapReady,
                     pointSourceReady,
+                    terrainReady,
+                    terrainFallbackActive,
                     hasRouteLine: Boolean(routeLine),
                     routeCoordsLength: fullRouteCoords.length,
                     totalDistance
