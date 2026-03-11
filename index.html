@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>玉山 3D 路線動畫 (Relive Clone)</title>
+    <title>3D 路線</title>
     <!-- 使用在沙盒 iframe 中相容性極佳的 MapLibre GL JS v2.4.0 -->
     <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
     <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
@@ -46,8 +46,8 @@
         <div class="flex justify-between items-start">
             <div
                 class="bg-black/60 backdrop-blur-md rounded-xl p-4 border border-white/10 pointer-events-auto shadow-lg">
-                <h1 class="text-xl font-bold mb-1 tracking-wider text-blue-400">玉山主峰單攻</h1>
-                <p class="text-sm text-gray-300 mb-4">東埔山莊 ↔ 玉山主峰</p>
+                <h1 id="route-title" class="text-xl font-bold mb-1 tracking-wider text-blue-400">玉山主峰單攻</h1>
+                <p id="route-description" class="text-sm text-gray-300 mb-4">東埔山莊 ↔ 玉山主峰</p>
                 <div class="grid grid-cols-2 gap-6">
                     <div>
                         <p class="text-xs text-gray-400 uppercase tracking-widest">距離</p>
@@ -111,6 +111,10 @@
         const elevationDisplay = document.getElementById('elevation-display');
         const playBtn = document.getElementById('play-btn');
         const pauseBtn = document.getElementById('pause-btn');
+        const routeTitleEl = document.getElementById('route-title');
+        const defaultRouteTitleText = routeTitleEl?.textContent?.trim() || '玉山主峰單攻';
+        const routeDescriptionEl = document.getElementById('route-description');
+        const defaultRouteDescriptionText = routeDescriptionEl?.textContent?.trim() || '東埔山莊 ↔ 玉山主峰';
 
         function hasPointSource() {
             return Boolean(map && map.getSource && map.getSource('point'));
@@ -182,6 +186,25 @@
             return lastPoint.elevation;
         }
 
+        function formatUtcPlus8(rawTimeText) {
+            if (!rawTimeText) return '';
+
+            const parsedTime = new Date(rawTimeText);
+            if (Number.isNaN(parsedTime.getTime())) return '';
+
+            const utcPlus8Ms = parsedTime.getTime() + (8 * 60 * 60 * 1000);
+            const utcPlus8Date = new Date(utcPlus8Ms);
+
+            const year = utcPlus8Date.getUTCFullYear();
+            const month = String(utcPlus8Date.getUTCMonth() + 1).padStart(2, '0');
+            const day = String(utcPlus8Date.getUTCDate()).padStart(2, '0');
+            const hours = String(utcPlus8Date.getUTCHours()).padStart(2, '0');
+            const minutes = String(utcPlus8Date.getUTCMinutes()).padStart(2, '0');
+            const seconds = String(utcPlus8Date.getUTCSeconds()).padStart(2, '0');
+
+            return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} +08:00`;
+        }
+
         async function loadRouteFromGpx(path) {
             let response;
             try {
@@ -199,6 +222,14 @@
             if (xmlDoc.getElementsByTagName('parsererror').length > 0) {
                 throw new Error('GPX XML 解析失敗');
             }
+
+            const trkNode = xmlDoc.getElementsByTagNameNS('*', 'trk')[0];
+            const trkNameNode = trkNode ? trkNode.getElementsByTagNameNS('*', 'name')[0] : null;
+            const gpxTrackName = trkNameNode?.textContent?.trim() || '';
+            const metadataNode = xmlDoc.getElementsByTagNameNS('*', 'metadata')[0];
+            const metadataTimeNode = metadataNode ? metadataNode.getElementsByTagNameNS('*', 'time')[0] : null;
+            const gpxMetadataTimeRaw = metadataTimeNode?.textContent?.trim() || '';
+            const gpxMetadataTime = formatUtcPlus8(gpxMetadataTimeRaw);
 
             const trkpts = Array.from(xmlDoc.getElementsByTagNameNS('*', 'trkpt'));
             const points = trkpts
@@ -227,6 +258,13 @@
             routeLine = turf.lineString(fullRouteCoords);
             totalDistance = turf.length(routeLine, { units: 'kilometers' });
             routeDistanceProfile = buildRouteDistanceProfile(fullRouteCoords);
+
+            if (routeTitleEl) {
+                routeTitleEl.textContent = gpxTrackName || defaultRouteTitleText;
+            }
+            if (routeDescriptionEl) {
+                routeDescriptionEl.textContent = gpxMetadataTime || defaultRouteDescriptionText;
+            }
         }
 
         function initMap() {
