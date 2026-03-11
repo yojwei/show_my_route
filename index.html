@@ -90,26 +90,12 @@
     </div>
 
     <script>
-        // 玉山路線的簡化座標點 [經度, 緯度, 高度]
-        const yushanWaypoints = [
-            [120.884, 23.487, 2580], // 東埔山莊
-            [120.881, 23.473, 2610], // 塔塔加登山口
-            [120.893, 23.468, 2838], // 孟祿亭
-            [120.908, 23.466, 3042], // 白木林觀景台
-            [120.933, 23.463, 3402], // 排雲山莊
-            [120.957, 23.470, 3952]  // 玉山主峰
-        ];
-
-        // 產生「上山 + 下山」的完整來回軌跡
-        const fullRouteCoords = [...yushanWaypoints];
-        for (let i = yushanWaypoints.length - 2; i >= 0; i--) {
-            fullRouteCoords.push(yushanWaypoints[i]); // 將陣列反轉加入，形成原路折返
-        }
-
-        // 將陣列轉換為 Turf.js 可以處理的 GeoJSON LineString
-        const routeLine = turf.lineString(fullRouteCoords);
-        const totalDistance = turf.length(routeLine, { units: 'kilometers' });
-        const routeDistanceProfile = buildRouteDistanceProfile(fullRouteCoords);
+        // 路線資料（由 GPX 載入後填入）
+        let yushanWaypoints = [];
+        let fullRouteCoords = [];
+        let routeLine;
+        let totalDistance = 0;
+        let routeDistanceProfile = [];
 
         let map;
         let animationId;
@@ -166,8 +152,52 @@
             return lastPoint.elevation;
         }
 
-        // 直接初始化地圖
-        initMap();
+        async function loadRouteFromGpx(path) {
+            let response;
+            try {
+                response = await fetch(path);
+            } catch (err) {
+                throw new Error(`GPX 載入失敗: ${err.message}`);
+            }
+
+            if (!response.ok) {
+                throw new Error(`GPX 載入失敗: ${response.status} ${response.statusText}`);
+            }
+
+            const gpxText = await response.text();
+            const xmlDoc = new DOMParser().parseFromString(gpxText, 'application/xml');
+            if (xmlDoc.getElementsByTagName('parsererror').length > 0) {
+                throw new Error('GPX XML 解析失敗');
+            }
+
+            const trkpts = Array.from(xmlDoc.getElementsByTagNameNS('*', 'trkpt'));
+            const points = trkpts
+                .map((pt) => {
+                    const lat = Number(pt.getAttribute('lat'));
+                    const lon = Number(pt.getAttribute('lon'));
+                    const eleNode = pt.getElementsByTagNameNS('*', 'ele')[0];
+                    const ele = eleNode ? Number(eleNode.textContent) : 0;
+
+                    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+                    return [lon, lat, Number.isFinite(ele) ? ele : 0];
+                })
+                .filter(Boolean);
+
+            if (points.length < 2) {
+                throw new Error('GPX trkpt 不足，至少需要 2 個點');
+            }
+
+            yushanWaypoints = points;
+
+            fullRouteCoords = [...yushanWaypoints];
+            for (let i = yushanWaypoints.length - 2; i >= 0; i--) {
+                fullRouteCoords.push(yushanWaypoints[i]);
+            }
+
+            routeLine = turf.lineString(fullRouteCoords);
+            totalDistance = turf.length(routeLine, { units: 'kilometers' });
+            routeDistanceProfile = buildRouteDistanceProfile(fullRouteCoords);
+        }
 
         function initMap() {
             try {
@@ -204,7 +234,7 @@
                             exaggeration: 1.5
                         }
                     },
-                    center: yushanWaypoints[0],
+                    center: [yushanWaypoints[0][0], yushanWaypoints[0][1]],
                     zoom: 13,
                     pitch: 60,
                     bearing: 150
@@ -300,6 +330,16 @@
                 pauseBtn.classList.add('hidden');
             }
         }
+
+        (async function bootstrap() {
+            try {
+                await loadRouteFromGpx('gpx/Qixingshan.gpx');
+                initMap();
+            } catch (err) {
+                console.error('初始化失敗:', err);
+                alert(`無法載入 GPX：${err.message}`);
+            }
+        })();
 
         playBtn.addEventListener('click', () => {
             if (currentDistance >= totalDistance) {
