@@ -103,11 +103,41 @@
         const animationDuration = 40000; // 動畫總時長 (毫秒)
         let isPlaying = false;
         let lastTime = 0;
+        let routeReady = false;
+        let mapReady = false;
+        let pointSourceReady = false;
 
         const distanceDisplay = document.getElementById('distance-display');
         const elevationDisplay = document.getElementById('elevation-display');
         const playBtn = document.getElementById('play-btn');
         const pauseBtn = document.getElementById('pause-btn');
+
+        function hasPointSource() {
+            return Boolean(map && map.getSource && map.getSource('point'));
+        }
+
+        function updatePlayAvailability() {
+            const canPlay = routeReady
+                && mapReady
+                && pointSourceReady
+                && Boolean(routeLine)
+                && Number.isFinite(totalDistance)
+                && totalDistance > 0;
+
+            playBtn.disabled = !canPlay;
+            playBtn.classList.toggle('opacity-50', !canPlay);
+            playBtn.classList.toggle('cursor-not-allowed', !canPlay);
+            playBtn.classList.toggle('hover:scale-105', canPlay);
+            return canPlay;
+        }
+
+        function stopAnimationWithError(reason, diagnostics = {}) {
+            console.error('[ANIM_GUARD_FAIL]', reason, diagnostics);
+            isPlaying = false;
+            toggleButtons();
+            cancelAnimationFrame(animationId);
+            animationId = undefined;
+        }
 
         function buildRouteDistanceProfile(coords) {
             const profile = [{ distance: 0, elevation: coords[0][2] ?? 0 }];
@@ -200,6 +230,10 @@
         }
 
         function initMap() {
+            mapReady = false;
+            pointSourceReady = false;
+            updatePlayAvailability();
+
             try {
                 map = new maplibregl.Map({
                     container: 'map',
@@ -241,84 +275,144 @@
                 });
 
                 map.on('load', () => {
-                    map.addSource('route', {
-                        'type': 'geojson',
-                        'data': routeLine
-                    });
-                    map.addLayer({
-                        'id': 'route-line',
-                        'type': 'line',
-                        'source': 'route',
-                        'layout': {
-                            'line-join': 'round',
-                            'line-cap': 'round'
-                        },
-                        'paint': {
-                            'line-color': 'rgba(255, 255, 255, 0.5)',
-                            'line-width': 4,
-                            'line-dasharray': [2, 2]
-                        }
-                    });
+                    try {
+                        map.addSource('route', {
+                            'type': 'geojson',
+                            'data': routeLine
+                        });
+                        map.addLayer({
+                            'id': 'route-line',
+                            'type': 'line',
+                            'source': 'route',
+                            'layout': {
+                                'line-join': 'round',
+                                'line-cap': 'round'
+                            },
+                            'paint': {
+                                'line-color': 'rgba(255, 255, 255, 0.5)',
+                                'line-width': 4,
+                                'line-dasharray': [2, 2]
+                            }
+                        });
 
-                    map.addSource('point', {
-                        'type': 'geojson',
-                        'data': turf.point(fullRouteCoords[0])
-                    });
-                    map.addLayer({
-                        'id': 'point-circle',
-                        'type': 'circle',
-                        'source': 'point',
-                        'paint': {
-                            'circle-radius': 8,
-                            'circle-color': '#3b82f6',
-                            'circle-stroke-width': 3,
-                            'circle-stroke-color': '#ffffff'
-                        }
-                    });
+                        map.addSource('point', {
+                            'type': 'geojson',
+                            'data': turf.point(fullRouteCoords[0])
+                        });
+                        map.addLayer({
+                            'id': 'point-circle',
+                            'type': 'circle',
+                            'source': 'point',
+                            'paint': {
+                                'circle-radius': 8,
+                                'circle-color': '#3b82f6',
+                                'circle-stroke-width': 3,
+                                'circle-stroke-color': '#ffffff'
+                            }
+                        });
+
+                        mapReady = true;
+                        pointSourceReady = hasPointSource();
+                        updatePlayAvailability();
+                    } catch (err) {
+                        mapReady = false;
+                        pointSourceReady = false;
+                        updatePlayAvailability();
+                        console.error('地圖載入流程失敗（控制已停用）:', err, {
+                            hasRouteLine: Boolean(routeLine),
+                            routeCoordsLength: fullRouteCoords.length
+                        });
+                    }
                 });
             } catch (err) {
+                mapReady = false;
+                pointSourceReady = false;
+                updatePlayAvailability();
                 console.error("地圖初始化失敗:", err);
                 alert("在目前的沙盒預覽環境中載入地圖失敗，但此程式碼在您真實的伺服器上可以正常運作。");
             }
         }
 
         function animateMarker(timestamp) {
+            if (!isPlaying) return;
+
             if (!lastTime) lastTime = timestamp;
             const deltaTime = timestamp - lastTime;
             lastTime = timestamp;
 
-            if (isPlaying) {
-                const speed = totalDistance / animationDuration;
-                currentDistance += speed * deltaTime;
+            const speed = totalDistance / animationDuration;
+            currentDistance += speed * deltaTime;
 
-                if (currentDistance >= totalDistance) {
-                    currentDistance = totalDistance;
-                    isPlaying = false;
-                    toggleButtons();
-                }
-
-                const currentPoint = turf.along(routeLine, currentDistance, { units: 'kilometers' });
-                const lookAheadDistance = Math.min(currentDistance + 0.5, totalDistance);
-                const lookAheadPoint = turf.along(routeLine, lookAheadDistance, { units: 'kilometers' });
-                const currentBearing = turf.bearing(currentPoint, lookAheadPoint);
-
-                map.getSource('point').setData(currentPoint);
-
-                const coords = currentPoint.geometry.coordinates;
-                distanceDisplay.textContent = currentDistance.toFixed(1);
-
-                const elevation = getElevationAtDistance(currentDistance);
-                elevationDisplay.textContent = Math.floor(elevation);
-
-                map.jumpTo({
-                    center: coords,
-                    zoom: 13.5,
-                    pitch: 65,
-                    bearing: currentBearing
-                });
+            if (currentDistance >= totalDistance) {
+                currentDistance = totalDistance;
+                isPlaying = false;
+                toggleButtons();
             }
 
-            animationId = requestAnimationFrame(animateMarker);
+            const lookAheadDistance = Math.min(currentDistance + 0.5, totalDistance);
+            const hasRouteLine = Boolean(
+                routeLine
+                && routeLine.geometry
+                && Array.isArray(routeLine.geometry.coordinates)
+                && routeLine.geometry.coordinates.length >= 2
+            );
+            const distancesAreFinite = Number.isFinite(currentDistance)
+                && Number.isFinite(totalDistance)
+                && Number.isFinite(lookAheadDistance);
+            const pointSource = map && map.getSource ? map.getSource('point') : null;
+            pointSourceReady = Boolean(pointSource);
+
+            if (!hasRouteLine || !distancesAreFinite || !pointSource) {
+                stopAnimationWithError('動畫前置檢查失敗，已中止播放', {
+                    hasRouteLine,
+                    distancesAreFinite,
+                    currentDistance,
+                    lookAheadDistance,
+                    totalDistance,
+                    pointSourceReady,
+                    routeReady,
+                    mapReady
+                });
+                updatePlayAvailability();
+                return;
+            }
+
+            let currentPoint;
+            let currentBearing;
+            try {
+                currentPoint = turf.along(routeLine, currentDistance, { units: 'kilometers' });
+                const lookAheadPoint = turf.along(routeLine, lookAheadDistance, { units: 'kilometers' });
+                currentBearing = turf.bearing(currentPoint, lookAheadPoint);
+            } catch (err) {
+                stopAnimationWithError('Turf 計算失敗，已中止播放', {
+                    currentDistance,
+                    lookAheadDistance,
+                    totalDistance,
+                    hasRouteLine,
+                    pointSourceReady,
+                    error: err.message
+                });
+                return;
+            }
+
+            pointSource.setData(currentPoint);
+
+            const coords = currentPoint.geometry.coordinates;
+            distanceDisplay.textContent = currentDistance.toFixed(1);
+
+            const elevation = getElevationAtDistance(currentDistance);
+            elevationDisplay.textContent = Math.floor(elevation);
+
+            map.jumpTo({
+                center: coords,
+                zoom: 13.5,
+                pitch: 65,
+                bearing: currentBearing
+            });
+
+            if (isPlaying) {
+                animationId = requestAnimationFrame(animateMarker);
+            }
         }
 
         function toggleButtons() {
@@ -329,33 +423,67 @@
                 playBtn.classList.remove('hidden');
                 pauseBtn.classList.add('hidden');
             }
+            pauseBtn.disabled = !isPlaying;
         }
 
         (async function bootstrap() {
             try {
                 await loadRouteFromGpx('gpx/Qixingshan.gpx');
+                routeReady = true;
+                updatePlayAvailability();
                 initMap();
             } catch (err) {
-                console.error('初始化失敗:', err);
+                routeReady = false;
+                mapReady = false;
+                pointSourceReady = false;
+                isPlaying = false;
+                toggleButtons();
+                updatePlayAvailability();
+                console.error('初始化失敗（控制已停用）:', err, {
+                    routeReady,
+                    mapReady,
+                    pointSourceReady,
+                    hasRouteLine: Boolean(routeLine),
+                    routeCoordsLength: fullRouteCoords.length,
+                    totalDistance
+                });
                 alert(`無法載入 GPX：${err.message}`);
             }
         })();
 
         playBtn.addEventListener('click', () => {
+            pointSourceReady = hasPointSource();
+            const canPlay = updatePlayAvailability();
+            if (!canPlay) {
+                console.error('[PLAY_GUARD_FAIL] 路線或地圖尚未就緒，已阻止播放', {
+                    routeReady,
+                    mapReady,
+                    pointSourceReady,
+                    hasRouteLine: Boolean(routeLine),
+                    totalDistance
+                });
+                return;
+            }
+
             if (currentDistance >= totalDistance) {
                 currentDistance = 0;
             }
             isPlaying = true;
-            lastTime = performance.now();
+            lastTime = 0;
             toggleButtons();
             cancelAnimationFrame(animationId);
-            animateMarker(performance.now());
+            animationId = requestAnimationFrame(animateMarker);
         });
 
         pauseBtn.addEventListener('click', () => {
             isPlaying = false;
+            cancelAnimationFrame(animationId);
+            animationId = undefined;
             toggleButtons();
         });
+
+        toggleButtons();
+        updatePlayAvailability();
 
     </script>
 </body>
