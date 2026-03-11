@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>玉山 3D 路線動畫 (Relive Clone)</title>
+    <!-- 使用在沙盒 iframe 中相容性極佳的 MapLibre GL JS v2.4.0 -->
+    <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
+    <!-- Turf.js (用於地理空間計算，如距離、方向、內插點) -->
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+    <!-- Tailwind CSS (用於快速排版) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #111;
+        }
+
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+
+        /* 隱藏 MapLibre 預設的 UI 元件以獲得更沉浸的體驗 */
+        .maplibregl-ctrl-top-right,
+        .maplibregl-ctrl-bottom-right {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body class="text-white font-sans">
+
+    <!-- 地圖容器 -->
+    <div id="map"></div>
+
+    <!-- 儀表板與控制列 (直接顯示) -->
+    <div id="ui-overlay" class="absolute inset-0 z-40 pointer-events-none flex flex-col justify-between p-6">
+        <!-- 頂部：數據儀表板 -->
+        <div class="flex justify-between items-start">
+            <div
+                class="bg-black/60 backdrop-blur-md rounded-xl p-4 border border-white/10 pointer-events-auto shadow-lg">
+                <h1 class="text-xl font-bold mb-1 tracking-wider text-blue-400">玉山主峰單攻</h1>
+                <p class="text-sm text-gray-300 mb-4">東埔山莊 ↔ 玉山主峰</p>
+                <div class="grid grid-cols-2 gap-6">
+                    <div>
+                        <p class="text-xs text-gray-400 uppercase tracking-widest">距離</p>
+                        <p class="text-2xl font-mono font-bold"><span id="distance-display">0.0</span> <span
+                                class="text-sm font-sans">km</span></p>
+                    </div>
+                    <div>
+                        <p class="text-xs text-gray-400 uppercase tracking-widest">模擬海拔</p>
+                        <p class="text-2xl font-mono font-bold"><span id="elevation-display">2580</span> <span
+                                class="text-sm font-sans">m</span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 底部：播放控制 -->
+        <div class="flex justify-center pb-8">
+            <div
+                class="bg-black/60 backdrop-blur-md rounded-full p-2 pointer-events-auto flex gap-4 border border-white/10">
+                <button id="play-btn"
+                    class="bg-blue-600 hover:bg-blue-500 text-white rounded-full p-4 transition-transform hover:scale-105">
+                    <!-- Play Icon -->
+                    <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd"
+                            d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
+                            clip-rule="evenodd"></path>
+                    </svg>
+                </button>
+                <button id="pause-btn"
+                    class="bg-gray-700 hover:bg-gray-600 text-white rounded-full p-4 hidden transition-transform hover:scale-105">
+                    <!-- Pause Icon -->
+                    <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd"
+                            d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z"
+                            clip-rule="evenodd"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 玉山路線的簡化座標點 [經度, 緯度, 高度]
+        const yushanWaypoints = [
+            [120.884, 23.487, 2580], // 東埔山莊
+            [120.881, 23.473, 2610], // 塔塔加登山口
+            [120.893, 23.468, 2838], // 孟祿亭
+            [120.908, 23.466, 3042], // 白木林觀景台
+            [120.933, 23.463, 3402], // 排雲山莊
+            [120.957, 23.470, 3952]  // 玉山主峰
+        ];
+
+        // 產生「上山 + 下山」的完整來回軌跡
+        const fullRouteCoords = [...yushanWaypoints];
+        for (let i = yushanWaypoints.length - 2; i >= 0; i--) {
+            fullRouteCoords.push(yushanWaypoints[i]); // 將陣列反轉加入，形成原路折返
+        }
+
+        // 將陣列轉換為 Turf.js 可以處理的 GeoJSON LineString
+        const routeLine = turf.lineString(fullRouteCoords);
+        const totalDistance = turf.length(routeLine, { units: 'kilometers' });
+        const routeDistanceProfile = buildRouteDistanceProfile(fullRouteCoords);
+
+        let map;
+        let animationId;
+        let currentDistance = 0;
+        const animationDuration = 40000; // 動畫總時長 (毫秒)
+        let isPlaying = false;
+        let lastTime = 0;
+
+        const distanceDisplay = document.getElementById('distance-display');
+        const elevationDisplay = document.getElementById('elevation-display');
+        const playBtn = document.getElementById('play-btn');
+        const pauseBtn = document.getElementById('pause-btn');
+
+        function buildRouteDistanceProfile(coords) {
+            const profile = [{ distance: 0, elevation: coords[0][2] ?? 0 }];
+            let accumulatedDistance = 0;
+
+            for (let i = 1; i < coords.length; i++) {
+                const segmentDistance = turf.distance(
+                    turf.point(coords[i - 1]),
+                    turf.point(coords[i]),
+                    { units: 'kilometers' }
+                );
+
+                accumulatedDistance += segmentDistance;
+                profile.push({
+                    distance: accumulatedDistance,
+                    elevation: coords[i][2] ?? profile[profile.length - 1].elevation
+                });
+            }
+
+            return profile;
+        }
+
+        function getElevationAtDistance(distanceKm) {
+            if (distanceKm <= 0) return routeDistanceProfile[0].elevation;
+
+            const lastPoint = routeDistanceProfile[routeDistanceProfile.length - 1];
+            if (distanceKm >= lastPoint.distance) return lastPoint.elevation;
+
+            for (let i = 1; i < routeDistanceProfile.length; i++) {
+                const previousPoint = routeDistanceProfile[i - 1];
+                const nextPoint = routeDistanceProfile[i];
+
+                if (distanceKm <= nextPoint.distance) {
+                    const segmentDistance = nextPoint.distance - previousPoint.distance;
+                    if (segmentDistance === 0) return nextPoint.elevation;
+
+                    const ratio = (distanceKm - previousPoint.distance) / segmentDistance;
+                    return previousPoint.elevation + (nextPoint.elevation - previousPoint.elevation) * ratio;
+                }
+            }
+
+            return lastPoint.elevation;
+        }
+
+        // 直接初始化地圖
+        initMap();
+
+        function initMap() {
+            try {
+                map = new maplibregl.Map({
+                    container: 'map',
+                    attributionControl: false,
+                    style: {
+                        version: 8,
+                        // 關鍵修復：強制提供絕對路徑的 glyphs，避免 MapLibre 讀取 location.href 觸發沙盒錯誤
+                        glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+                        sources: {
+                            'satellite': {
+                                type: 'raster',
+                                tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+                                tileSize: 256
+                            },
+                            'terrain-source': {
+                                type: 'raster-dem',
+                                tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+                                encoding: 'terrarium',
+                                tileSize: 256,
+                                maxzoom: 14
+                            }
+                        },
+                        layers: [{
+                            id: 'satellite-layer',
+                            type: 'raster',
+                            source: 'satellite',
+                            minzoom: 0,
+                            maxzoom: 22
+                        }],
+                        terrain: {
+                            source: 'terrain-source',
+                            exaggeration: 1.5
+                        }
+                    },
+                    center: yushanWaypoints[0],
+                    zoom: 13,
+                    pitch: 60,
+                    bearing: 150
+                });
+
+                map.on('load', () => {
+                    map.addSource('route', {
+                        'type': 'geojson',
+                        'data': routeLine
+                    });
+                    map.addLayer({
+                        'id': 'route-line',
+                        'type': 'line',
+                        'source': 'route',
+                        'layout': {
+                            'line-join': 'round',
+                            'line-cap': 'round'
+                        },
+                        'paint': {
+                            'line-color': 'rgba(255, 255, 255, 0.5)',
+                            'line-width': 4,
+                            'line-dasharray': [2, 2]
+                        }
+                    });
+
+                    map.addSource('point', {
+                        'type': 'geojson',
+                        'data': turf.point(fullRouteCoords[0])
+                    });
+                    map.addLayer({
+                        'id': 'point-circle',
+                        'type': 'circle',
+                        'source': 'point',
+                        'paint': {
+                            'circle-radius': 8,
+                            'circle-color': '#3b82f6',
+                            'circle-stroke-width': 3,
+                            'circle-stroke-color': '#ffffff'
+                        }
+                    });
+                });
+            } catch (err) {
+                console.error("地圖初始化失敗:", err);
+                alert("在目前的沙盒預覽環境中載入地圖失敗，但此程式碼在您真實的伺服器上可以正常運作。");
+            }
+        }
+
+        function animateMarker(timestamp) {
+            if (!lastTime) lastTime = timestamp;
+            const deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+
+            if (isPlaying) {
+                const speed = totalDistance / animationDuration;
+                currentDistance += speed * deltaTime;
+
+                if (currentDistance >= totalDistance) {
+                    currentDistance = totalDistance;
+                    isPlaying = false;
+                    toggleButtons();
+                }
+
+                const currentPoint = turf.along(routeLine, currentDistance, { units: 'kilometers' });
+                const lookAheadDistance = Math.min(currentDistance + 0.5, totalDistance);
+                const lookAheadPoint = turf.along(routeLine, lookAheadDistance, { units: 'kilometers' });
+                const currentBearing = turf.bearing(currentPoint, lookAheadPoint);
+
+                map.getSource('point').setData(currentPoint);
+
+                const coords = currentPoint.geometry.coordinates;
+                distanceDisplay.textContent = currentDistance.toFixed(1);
+
+                const elevation = getElevationAtDistance(currentDistance);
+                elevationDisplay.textContent = Math.floor(elevation);
+
+                map.jumpTo({
+                    center: coords,
+                    zoom: 13.5,
+                    pitch: 65,
+                    bearing: currentBearing
+                });
+            }
+
+            animationId = requestAnimationFrame(animateMarker);
+        }
+
+        function toggleButtons() {
+            if (isPlaying) {
+                playBtn.classList.add('hidden');
+                pauseBtn.classList.remove('hidden');
+            } else {
+                playBtn.classList.remove('hidden');
+                pauseBtn.classList.add('hidden');
+            }
+        }
+
+        playBtn.addEventListener('click', () => {
+            if (currentDistance >= totalDistance) {
+                currentDistance = 0;
+            }
+            isPlaying = true;
+            lastTime = performance.now();
+            toggleButtons();
+            cancelAnimationFrame(animationId);
+            animateMarker(performance.now());
+        });
+
+        pauseBtn.addEventListener('click', () => {
+            isPlaying = false;
+            toggleButtons();
+        });
+
+    </script>
+</body>
+
+</html>
