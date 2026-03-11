@@ -43,7 +43,7 @@
     <!-- 儀表板與控制列 (直接顯示) -->
     <div id="ui-overlay" class="absolute inset-0 z-40 pointer-events-none flex flex-col justify-between p-6">
         <!-- 頂部：數據儀表板 -->
-        <div class="flex justify-between items-start">
+        <div class="flex justify-between items-start gap-4">
             <div
                 class="bg-black/60 backdrop-blur-md rounded-xl p-4 border border-white/10 pointer-events-auto shadow-lg">
                 <h1 id="route-title" class="text-xl font-bold mb-1 tracking-wider text-blue-400">玉山主峰單攻</h1>
@@ -60,6 +60,16 @@
                                 class="text-sm font-sans">m</span></p>
                     </div>
                 </div>
+            </div>
+            <div
+                class="bg-black/60 backdrop-blur-md rounded-xl p-4 border border-white/10 pointer-events-auto shadow-lg min-w-[220px]">
+                <button id="upload-btn"
+                    class="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900/70 disabled:cursor-not-allowed text-white rounded-lg px-4 py-2 text-sm font-semibold transition">
+                    上傳 GPX
+                </button>
+                <input id="gpx-upload-input" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml"
+                    class="hidden">
+                <p id="upload-status" class="text-xs text-gray-300 mt-3 leading-relaxed break-all">目前使用內建 GPX</p>
             </div>
         </div>
 
@@ -115,6 +125,9 @@
         const defaultRouteTitleText = routeTitleEl?.textContent?.trim() || '玉山主峰單攻';
         const routeDescriptionEl = document.getElementById('route-description');
         const defaultRouteDescriptionText = routeDescriptionEl?.textContent?.trim() || '東埔山莊 ↔ 玉山主峰';
+        const uploadBtn = document.getElementById('upload-btn');
+        const gpxUploadInput = document.getElementById('gpx-upload-input');
+        const uploadStatusEl = document.getElementById('upload-status');
 
         function hasPointSource() {
             return Boolean(map && map.getSource && map.getSource('point'));
@@ -133,6 +146,22 @@
             playBtn.classList.toggle('cursor-not-allowed', !canPlay);
             playBtn.classList.toggle('hover:scale-105', canPlay);
             return canPlay;
+        }
+
+        function setUploadStatus(message, state = 'idle') {
+            if (!uploadStatusEl) return;
+
+            uploadStatusEl.textContent = message;
+            uploadStatusEl.classList.remove('text-gray-300', 'text-blue-300', 'text-green-300', 'text-red-400');
+
+            const stateClass = {
+                idle: 'text-gray-300',
+                loading: 'text-blue-300',
+                success: 'text-green-300',
+                error: 'text-red-400'
+            }[state] || 'text-gray-300';
+
+            uploadStatusEl.classList.add(stateClass);
         }
 
         function stopAnimationWithError(reason, diagnostics = {}) {
@@ -236,19 +265,35 @@
             };
         }
 
-        async function loadRouteFromGpx(path) {
-            let response;
-            try {
-                response = await fetch(path);
-            } catch (err) {
-                throw new Error(`GPX 載入失敗: ${err.message}`);
+        async function readGpxTextFromSource(source) {
+            if (typeof source === 'string') {
+                let response;
+                try {
+                    response = await fetch(source);
+                } catch (err) {
+                    throw new Error(`GPX 載入失敗: ${err.message}`);
+                }
+
+                if (!response.ok) {
+                    throw new Error(`GPX 載入失敗: ${response.status} ${response.statusText}`);
+                }
+
+                return response.text();
             }
 
-            if (!response.ok) {
-                throw new Error(`GPX 載入失敗: ${response.status} ${response.statusText}`);
+            const isFileObject = typeof File !== 'undefined' && source instanceof File;
+            if (isFileObject) {
+                try {
+                    return await source.text();
+                } catch (err) {
+                    throw new Error(`GPX 檔案讀取失敗: ${err.message}`);
+                }
             }
 
-            const gpxText = await response.text();
+            throw new Error('不支援的 GPX 來源');
+        }
+
+        function parseGpxRoute(gpxText) {
             const xmlDoc = new DOMParser().parseFromString(gpxText, 'application/xml');
             if (xmlDoc.getElementsByTagName('parsererror').length > 0) {
                 throw new Error('GPX XML 解析失敗');
@@ -279,6 +324,14 @@
                 throw new Error('GPX trkpt 不足，至少需要 2 個點');
             }
 
+            return {
+                points,
+                gpxTrackName,
+                gpxMetadataTime
+            };
+        }
+
+        function applyLoadedRoute({ points, gpxTrackName, gpxMetadataTime }) {
             yushanWaypoints = points;
 
             const roundTripStats = analyzeRoundTrip(yushanWaypoints);
@@ -297,6 +350,9 @@
             routeLine = turf.lineString(fullRouteCoords);
             totalDistance = turf.length(routeLine, { units: 'kilometers' });
             routeDistanceProfile = buildRouteDistanceProfile(fullRouteCoords);
+            if (!Number.isFinite(totalDistance) || totalDistance <= 0 || routeDistanceProfile.length < 2) {
+                throw new Error('GPX 路線資料無效，無法建立動畫路徑');
+            }
 
             if (routeTitleEl) {
                 routeTitleEl.textContent = gpxTrackName || defaultRouteTitleText;
@@ -304,6 +360,146 @@
             if (routeDescriptionEl) {
                 routeDescriptionEl.textContent = gpxMetadataTime || defaultRouteDescriptionText;
             }
+        }
+
+        async function loadRouteFromGpx(source) {
+            const gpxText = await readGpxTextFromSource(source);
+            const parsedRoute = parseGpxRoute(gpxText);
+            applyLoadedRoute(parsedRoute);
+        }
+
+        function ensureRouteAndPointLayers() {
+            if (!map) return;
+
+            const startPoint = turf.point(fullRouteCoords[0]);
+            const routeSource = map.getSource('route');
+            if (routeSource && routeSource.setData) {
+                routeSource.setData(routeLine);
+            } else if (!routeSource) {
+                map.addSource('route', {
+                    type: 'geojson',
+                    data: routeLine
+                });
+            }
+
+            if (!map.getLayer('route-line')) {
+                map.addLayer({
+                    id: 'route-line',
+                    type: 'line',
+                    source: 'route',
+                    layout: {
+                        'line-join': 'round',
+                        'line-cap': 'round'
+                    },
+                    paint: {
+                        'line-color': 'rgba(255, 255, 255, 0.5)',
+                        'line-width': 4,
+                        'line-dasharray': [2, 2]
+                    }
+                });
+            }
+
+            const pointSource = map.getSource('point');
+            if (pointSource && pointSource.setData) {
+                pointSource.setData(startPoint);
+            } else if (!pointSource) {
+                map.addSource('point', {
+                    type: 'geojson',
+                    data: startPoint
+                });
+            }
+
+            if (!map.getLayer('point-circle')) {
+                map.addLayer({
+                    id: 'point-circle',
+                    type: 'circle',
+                    source: 'point',
+                    paint: {
+                        'circle-radius': 8,
+                        'circle-color': '#3b82f6',
+                        'circle-stroke-width': 3,
+                        'circle-stroke-color': '#ffffff'
+                    }
+                });
+            }
+        }
+
+        function moveCameraToRouteStart() {
+            if (!map || !mapReady || !Array.isArray(fullRouteCoords) || fullRouteCoords.length < 1) return;
+
+            let initialBearing = map.getBearing();
+            if (fullRouteCoords.length >= 2) {
+                try {
+                    initialBearing = turf.bearing(
+                        turf.point(fullRouteCoords[0]),
+                        turf.point(fullRouteCoords[1])
+                    );
+                } catch (err) {
+                    console.warn('初始方向計算失敗，使用當前地圖方向:', err.message);
+                }
+            }
+
+            map.jumpTo({
+                center: fullRouteCoords[0],
+                zoom: 13.5,
+                pitch: 65,
+                bearing: Number.isFinite(initialBearing) ? initialBearing : map.getBearing()
+            });
+        }
+
+        function resetPlaybackState() {
+            isPlaying = false;
+            cancelAnimationFrame(animationId);
+            animationId = undefined;
+            currentDistance = 0;
+            lastTime = 0;
+            distanceDisplay.textContent = '0.0';
+
+            const initialElevation = routeDistanceProfile[0]?.elevation;
+            if (Number.isFinite(initialElevation)) {
+                elevationDisplay.textContent = Math.floor(initialElevation);
+            }
+
+            toggleButtons();
+        }
+
+        function syncRouteToMap() {
+            if (!map || !mapReady) {
+                pointSourceReady = hasPointSource();
+                updatePlayAvailability();
+                return;
+            }
+
+            ensureRouteAndPointLayers();
+            pointSourceReady = hasPointSource();
+            moveCameraToRouteStart();
+            updatePlayAvailability();
+        }
+
+        function startPlayback(trigger = 'manual') {
+            pointSourceReady = hasPointSource();
+            const canPlay = updatePlayAvailability();
+            if (!canPlay) {
+                console.error('[PLAY_GUARD_FAIL] 路線或地圖尚未就緒，已阻止播放', {
+                    trigger,
+                    routeReady,
+                    mapReady,
+                    pointSourceReady,
+                    hasRouteLine: Boolean(routeLine),
+                    totalDistance
+                });
+                return false;
+            }
+
+            if (currentDistance >= totalDistance) {
+                currentDistance = 0;
+            }
+            isPlaying = true;
+            lastTime = 0;
+            toggleButtons();
+            cancelAnimationFrame(animationId);
+            animationId = requestAnimationFrame(animateMarker);
+            return true;
         }
 
         function initMap() {
@@ -353,43 +549,11 @@
 
                 map.on('load', () => {
                     try {
-                        map.addSource('route', {
-                            'type': 'geojson',
-                            'data': routeLine
-                        });
-                        map.addLayer({
-                            'id': 'route-line',
-                            'type': 'line',
-                            'source': 'route',
-                            'layout': {
-                                'line-join': 'round',
-                                'line-cap': 'round'
-                            },
-                            'paint': {
-                                'line-color': 'rgba(255, 255, 255, 0.5)',
-                                'line-width': 4,
-                                'line-dasharray': [2, 2]
-                            }
-                        });
-
-                        map.addSource('point', {
-                            'type': 'geojson',
-                            'data': turf.point(fullRouteCoords[0])
-                        });
-                        map.addLayer({
-                            'id': 'point-circle',
-                            'type': 'circle',
-                            'source': 'point',
-                            'paint': {
-                                'circle-radius': 8,
-                                'circle-color': '#3b82f6',
-                                'circle-stroke-width': 3,
-                                'circle-stroke-color': '#ffffff'
-                            }
-                        });
-
                         mapReady = true;
+                        ensureRouteAndPointLayers();
+                        resetPlaybackState();
                         pointSourceReady = hasPointSource();
+                        moveCameraToRouteStart();
                         updatePlayAvailability();
                     } catch (err) {
                         mapReady = false;
@@ -503,11 +667,50 @@
             pauseBtn.disabled = !isPlaying;
         }
 
+        async function handleGpxUpload(file) {
+            if (!file) return;
+
+            setUploadStatus(`載入中：${file.name}`, 'loading');
+            if (uploadBtn) {
+                uploadBtn.disabled = true;
+            }
+
+            try {
+                await loadRouteFromGpx(file);
+                routeReady = true;
+                resetPlaybackState();
+                syncRouteToMap();
+                const autoStarted = startPlayback('upload');
+                setUploadStatus(
+                    autoStarted
+                        ? `載入成功：${file.name}，已自動播放`
+                        : `載入成功：${file.name}，可手動播放`,
+                    'success'
+                );
+            } catch (err) {
+                console.error('上傳 GPX 失敗（狀態已保持穩定）:', err, {
+                    routeReady,
+                    mapReady,
+                    pointSourceReady
+                });
+                setUploadStatus(`載入失敗：${err.message}`, 'error');
+                updatePlayAvailability();
+            } finally {
+                if (uploadBtn) {
+                    uploadBtn.disabled = false;
+                }
+                if (gpxUploadInput) {
+                    gpxUploadInput.value = '';
+                }
+            }
+        }
+
         (async function bootstrap() {
             try {
                 await loadRouteFromGpx('gpx/Qixingshan.gpx');
                 routeReady = true;
                 updatePlayAvailability();
+                setUploadStatus('已載入內建 GPX，可上傳替換', 'idle');
                 initMap();
             } catch (err) {
                 routeReady = false;
@@ -516,6 +719,7 @@
                 isPlaying = false;
                 toggleButtons();
                 updatePlayAvailability();
+                setUploadStatus(`預設 GPX 載入失敗：${err.message}`, 'error');
                 console.error('初始化失敗（控制已停用）:', err, {
                     routeReady,
                     mapReady,
@@ -529,28 +733,19 @@
         })();
 
         playBtn.addEventListener('click', () => {
-            pointSourceReady = hasPointSource();
-            const canPlay = updatePlayAvailability();
-            if (!canPlay) {
-                console.error('[PLAY_GUARD_FAIL] 路線或地圖尚未就緒，已阻止播放', {
-                    routeReady,
-                    mapReady,
-                    pointSourceReady,
-                    hasRouteLine: Boolean(routeLine),
-                    totalDistance
-                });
-                return;
-            }
-
-            if (currentDistance >= totalDistance) {
-                currentDistance = 0;
-            }
-            isPlaying = true;
-            lastTime = 0;
-            toggleButtons();
-            cancelAnimationFrame(animationId);
-            animationId = requestAnimationFrame(animateMarker);
+            startPlayback('manual');
         });
+
+        if (uploadBtn && gpxUploadInput) {
+            uploadBtn.addEventListener('click', () => {
+                gpxUploadInput.click();
+            });
+
+            gpxUploadInput.addEventListener('change', async (event) => {
+                const selectedFile = event.target?.files?.[0];
+                await handleGpxUpload(selectedFile);
+            });
+        }
 
         pauseBtn.addEventListener('click', () => {
             isPlaying = false;
