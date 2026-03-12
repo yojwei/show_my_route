@@ -751,17 +751,178 @@
             applyLoadedRoute({ ...parsedRoute, fallbackRouteTitle });
         }
 
+        const ROUTE_ENDPOINT_SOURCE_ID = 'route-endpoints';
+        const ROUTE_ENDPOINT_OVERLAP_THRESHOLD_KM = 0.03;
+        const ROUTE_ENDPOINT_SEPARATION_KM = 0.012;
+        const ROUTE_ENDPOINT_FLAG_POLE_HEIGHT_KM = 0.016;
+        const ROUTE_ENDPOINT_FLAG_WIDTH_KM = 0.012;
+        const ROUTE_ENDPOINT_FLAG_HEIGHT_KM = 0.008;
+        const ROUTE_ENDPOINT_FLAG_LABEL_DROP_KM = 0.003;
+        const EMPTY_FEATURE_COLLECTION = { type: 'FeatureCollection', features: [] };
+
+        function normalizeLngLat(coord) {
+            if (!Array.isArray(coord) || coord.length < 2) return null;
+            const lng = Number(coord[0]);
+            const lat = Number(coord[1]);
+            if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+            return [lng, lat];
+        }
+
+        function buildEndpointFlagFeatures(marker, anchorCoord, flagSide) {
+            const anchorPoint = turf.point(anchorCoord);
+            const topCoord = turf.destination(anchorPoint, ROUTE_ENDPOINT_FLAG_POLE_HEIGHT_KM, 0, { units: 'kilometers' }).geometry.coordinates;
+            const flagTipCoord = turf.destination(
+                turf.point(topCoord),
+                ROUTE_ENDPOINT_FLAG_WIDTH_KM,
+                flagSide >= 0 ? 90 : 270,
+                { units: 'kilometers' }
+            ).geometry.coordinates;
+            const flagBottomCoord = turf.destination(
+                turf.point(topCoord),
+                ROUTE_ENDPOINT_FLAG_HEIGHT_KM,
+                180,
+                { units: 'kilometers' }
+            ).geometry.coordinates;
+            const labelBaseCoord = turf.destination(
+                turf.point(topCoord),
+                ROUTE_ENDPOINT_FLAG_WIDTH_KM * 0.52,
+                flagSide >= 0 ? 90 : 270,
+                { units: 'kilometers' }
+            ).geometry.coordinates;
+            const labelCoord = turf.destination(
+                turf.point(labelBaseCoord),
+                ROUTE_ENDPOINT_FLAG_LABEL_DROP_KM,
+                180,
+                { units: 'kilometers' }
+            ).geometry.coordinates;
+
+            return [
+                {
+                    type: 'Feature',
+                    geometry: {
+                        type: 'LineString',
+                        coordinates: [anchorCoord, topCoord]
+                    },
+                    properties: {
+                        kind: 'pole',
+                        marker
+                    }
+                },
+                {
+                    type: 'Feature',
+                    geometry: {
+                        type: 'Polygon',
+                        coordinates: [[topCoord, flagTipCoord, flagBottomCoord, topCoord]]
+                    },
+                    properties: {
+                        kind: 'flag',
+                        marker
+                    }
+                },
+                {
+                    type: 'Feature',
+                    geometry: {
+                        type: 'Point',
+                        coordinates: labelCoord
+                    },
+                    properties: {
+                        kind: 'label',
+                        marker
+                    }
+                }
+            ];
+        }
+
+        function buildRouteEndpointFeatureCollection(routeCoords) {
+            const normalizedCoords = Array.isArray(routeCoords) ? routeCoords.map(normalizeLngLat).filter(Boolean) : [];
+            if (normalizedCoords.length < 2) {
+                return EMPTY_FEATURE_COLLECTION;
+            }
+
+            let startAnchor = normalizedCoords[0];
+            let endAnchor = normalizedCoords[normalizedCoords.length - 1];
+
+            try {
+                const startEndDistanceKm = turf.distance(
+                    turf.point(startAnchor),
+                    turf.point(endAnchor),
+                    { units: 'kilometers' }
+                );
+                if (Number.isFinite(startEndDistanceKm) && startEndDistanceKm <= ROUTE_ENDPOINT_OVERLAP_THRESHOLD_KM) {
+                    let routeHeading = 90;
+                    if (normalizedCoords.length >= 2) {
+                        routeHeading = turf.bearing(
+                            turf.point(normalizedCoords[0]),
+                            turf.point(normalizedCoords[1])
+                        );
+                    }
+                    if (!Number.isFinite(routeHeading)) {
+                        routeHeading = 90;
+                    }
+
+                    startAnchor = turf.destination(
+                        turf.point(startAnchor),
+                        ROUTE_ENDPOINT_SEPARATION_KM,
+                        routeHeading + 90,
+                        { units: 'kilometers' }
+                    ).geometry.coordinates;
+                    endAnchor = turf.destination(
+                        turf.point(endAnchor),
+                        ROUTE_ENDPOINT_SEPARATION_KM,
+                        routeHeading - 90,
+                        { units: 'kilometers' }
+                    ).geometry.coordinates;
+                }
+            } catch (err) {
+                console.warn('起終點旗標位置計算失敗，使用原始座標:', err.message);
+            }
+
+            return {
+                type: 'FeatureCollection',
+                features: [
+                    ...buildEndpointFlagFeatures('A', startAnchor, 1),
+                    ...buildEndpointFlagFeatures('B', endAnchor, -1)
+                ]
+            };
+        }
+
         function ensureRouteAndPointLayers() {
             if (!map) return;
 
-            const startPoint = turf.point(fullRouteCoords[0]);
+            const normalizedCoords = Array.isArray(fullRouteCoords) ? fullRouteCoords.map(normalizeLngLat).filter(Boolean) : [];
+            const hasValidRoute = Boolean(
+                routeLine
+                && routeLine.geometry
+                && Array.isArray(routeLine.geometry.coordinates)
+                && routeLine.geometry.coordinates.length >= 2
+                && normalizedCoords.length >= 2
+            );
             const routeSource = map.getSource('route');
+            const pointSource = map.getSource('point');
+            const endpointSource = map.getSource(ROUTE_ENDPOINT_SOURCE_ID);
+
+            if (!hasValidRoute) {
+                if (routeSource && routeSource.setData) {
+                    routeSource.setData(EMPTY_FEATURE_COLLECTION);
+                }
+                if (pointSource && pointSource.setData) {
+                    pointSource.setData(EMPTY_FEATURE_COLLECTION);
+                }
+                if (endpointSource && endpointSource.setData) {
+                    endpointSource.setData(EMPTY_FEATURE_COLLECTION);
+                }
+                return;
+            }
+
+            const safeRouteLine = turf.lineString(normalizedCoords);
+            const startPoint = turf.point(normalizedCoords[0]);
+            const endpointFeatures = buildRouteEndpointFeatureCollection(normalizedCoords);
             if (routeSource && routeSource.setData) {
-                routeSource.setData(routeLine);
+                routeSource.setData(safeRouteLine);
             } else if (!routeSource) {
                 map.addSource('route', {
                     type: 'geojson',
-                    data: routeLine
+                    data: safeRouteLine
                 });
             }
 
@@ -782,7 +943,6 @@
                 });
             }
 
-            const pointSource = map.getSource('point');
             if (pointSource && pointSource.setData) {
                 pointSource.setData(startPoint);
             } else if (!pointSource) {
@@ -802,6 +962,62 @@
                         'circle-color': '#3b82f6',
                         'circle-stroke-width': 3,
                         'circle-stroke-color': '#ffffff'
+                    }
+                });
+            }
+
+            if (endpointSource && endpointSource.setData) {
+                endpointSource.setData(endpointFeatures);
+            } else if (!endpointSource) {
+                map.addSource(ROUTE_ENDPOINT_SOURCE_ID, {
+                    type: 'geojson',
+                    data: endpointFeatures
+                });
+            }
+
+            if (!map.getLayer('route-endpoint-poles')) {
+                map.addLayer({
+                    id: 'route-endpoint-poles',
+                    type: 'line',
+                    source: ROUTE_ENDPOINT_SOURCE_ID,
+                    filter: ['==', ['get', 'kind'], 'pole'],
+                    paint: {
+                        'line-color': '#ffffff',
+                        'line-width': 1.8,
+                        'line-opacity': 0.95
+                    }
+                });
+            }
+
+            if (!map.getLayer('route-endpoint-flags')) {
+                map.addLayer({
+                    id: 'route-endpoint-flags',
+                    type: 'fill',
+                    source: ROUTE_ENDPOINT_SOURCE_ID,
+                    filter: ['==', ['get', 'kind'], 'flag'],
+                    paint: {
+                        'fill-color': '#dc2626',
+                        'fill-opacity': 0.95
+                    }
+                });
+            }
+
+            if (!map.getLayer('route-endpoint-labels')) {
+                map.addLayer({
+                    id: 'route-endpoint-labels',
+                    type: 'symbol',
+                    source: ROUTE_ENDPOINT_SOURCE_ID,
+                    filter: ['==', ['get', 'kind'], 'label'],
+                    layout: {
+                        'text-field': ['get', 'marker'],
+                        'text-size': 10,
+                        'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+                        'text-allow-overlap': true
+                    },
+                    paint: {
+                        'text-color': '#ffffff',
+                        'text-halo-color': '#991b1b',
+                        'text-halo-width': 1.2
                     }
                 });
             }
