@@ -103,6 +103,8 @@
         // 路線資料（由 GPX 載入後填入）
         let yushanWaypoints = [];
         let fullRouteCoords = [];
+        let routeEndpointStartAnchor = null;
+        let routeEndpointEndAnchor = null;
         let routeLine;
         let totalDistance = 0;
         let routeDistanceProfile = [];
@@ -710,6 +712,9 @@
 
         function applyLoadedRoute({ points, pointTimes = [], gpxTrackName, gpxMetadataTime, fallbackRouteTitle = defaultRouteTitleText }) {
             yushanWaypoints = points;
+            const normalizedRawCoords = Array.isArray(yushanWaypoints) ? yushanWaypoints.map(normalizeLngLat).filter(Boolean) : [];
+            routeEndpointStartAnchor = normalizedRawCoords[0] ?? null;
+            routeEndpointEndAnchor = normalizedRawCoords.length >= 1 ? normalizedRawCoords[normalizedRawCoords.length - 1] : null;
 
             const routeDecision = decideRouteMode(yushanWaypoints, pointTimes);
             if (routeDecision.mode === 'already-round-trip') {
@@ -833,14 +838,16 @@
             ];
         }
 
-        function buildRouteEndpointFeatureCollection(routeCoords) {
+        function buildRouteEndpointFeatureCollection(routeCoords, endpointAnchors = {}) {
             const normalizedCoords = Array.isArray(routeCoords) ? routeCoords.map(normalizeLngLat).filter(Boolean) : [];
             if (normalizedCoords.length < 2) {
                 return EMPTY_FEATURE_COLLECTION;
             }
 
-            let startAnchor = normalizedCoords[0];
-            let endAnchor = normalizedCoords[normalizedCoords.length - 1];
+            const providedStartAnchor = normalizeLngLat(endpointAnchors.start);
+            const providedEndAnchor = normalizeLngLat(endpointAnchors.end);
+            let startAnchor = providedStartAnchor || normalizedCoords[0];
+            let endAnchor = providedEndAnchor || normalizedCoords[normalizedCoords.length - 1];
 
             try {
                 const startEndDistanceKm = turf.distance(
@@ -916,7 +923,10 @@
 
             const safeRouteLine = turf.lineString(normalizedCoords);
             const startPoint = turf.point(normalizedCoords[0]);
-            const endpointFeatures = buildRouteEndpointFeatureCollection(normalizedCoords);
+            const endpointFeatures = buildRouteEndpointFeatureCollection(normalizedCoords, {
+                start: routeEndpointStartAnchor,
+                end: routeEndpointEndAnchor
+            });
             if (routeSource && routeSource.setData) {
                 routeSource.setData(safeRouteLine);
             } else if (!routeSource) {
