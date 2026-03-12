@@ -388,6 +388,14 @@
             return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} +08:00`;
         }
 
+        function parseTrackPointTimeMs(rawTimeText) {
+            const normalizedText = typeof rawTimeText === 'string' ? rawTimeText.trim() : '';
+            if (!normalizedText) return null;
+
+            const parsedMs = Date.parse(normalizedText);
+            return Number.isFinite(parsedMs) ? parsedMs : null;
+        }
+
         function analyzeRoundTrip(points) {
             if (!Array.isArray(points) || points.length < 2) {
                 return {
@@ -417,6 +425,203 @@
                 startEndDistanceKm,
                 closureThresholdKm
             };
+        }
+
+        function analyzeTimeQuality(pointTimes) {
+            if (!Array.isArray(pointTimes) || pointTimes.length === 0) {
+                return {
+                    totalPoints: 0,
+                    timedPoints: 0,
+                    timeCoverageRatio: 0,
+                    monotonicPairs: 0,
+                    monotonicRatio: 0
+                };
+            }
+
+            const normalizedTimes = pointTimes.map((timeMs) => (Number.isFinite(timeMs) ? timeMs : null));
+            const timedIndexes = [];
+            for (let i = 0; i < normalizedTimes.length; i++) {
+                if (normalizedTimes[i] !== null) {
+                    timedIndexes.push(i);
+                }
+            }
+
+            let monotonicPairs = 0;
+            let comparablePairs = 0;
+            for (let i = 1; i < timedIndexes.length; i++) {
+                const prevTimeMs = normalizedTimes[timedIndexes[i - 1]];
+                const currentTimeMs = normalizedTimes[timedIndexes[i]];
+                comparablePairs += 1;
+                if (currentTimeMs >= prevTimeMs) {
+                    monotonicPairs += 1;
+                }
+            }
+
+            const monotonicRatio = comparablePairs > 0
+                ? monotonicPairs / comparablePairs
+                : (timedIndexes.length > 0 ? 1 : 0);
+
+            return {
+                totalPoints: normalizedTimes.length,
+                timedPoints: timedIndexes.length,
+                timeCoverageRatio: timedIndexes.length / normalizedTimes.length,
+                monotonicPairs,
+                monotonicRatio
+            };
+        }
+
+        function analyzeTimeOrderedDisplacement(points, pointTimes) {
+            const emptyStats = {
+                sampleCount: 0,
+                maxDistanceKm: 0,
+                maxDistanceIndex: -1,
+                maxDistanceSourceIndex: -1,
+                endDistanceKm: 0,
+                endToStartRatio: 1,
+                peakProgressRatio: 1
+            };
+
+            if (!Array.isArray(points) || points.length < 2 || !Array.isArray(pointTimes) || pointTimes.length < 2) {
+                return emptyStats;
+            }
+
+            const checkpointCount = Math.min(points.length, pointTimes.length);
+            const checkpoints = [];
+            for (let i = 0; i < checkpointCount; i++) {
+                const point = points[i];
+                const timeMs = pointTimes[i];
+                if (!Array.isArray(point) || point.length < 2) continue;
+                if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) continue;
+                if (!Number.isFinite(timeMs)) continue;
+
+                checkpoints.push({
+                    sourceIndex: i,
+                    timeMs,
+                    point
+                });
+            }
+
+            if (checkpoints.length < 2) {
+                return {
+                    ...emptyStats,
+                    sampleCount: checkpoints.length
+                };
+            }
+
+            checkpoints.sort((a, b) => {
+                if (a.timeMs !== b.timeMs) return a.timeMs - b.timeMs;
+                return a.sourceIndex - b.sourceIndex;
+            });
+
+            const startPoint = points[0];
+            let maxDistanceKm = -Infinity;
+            let maxDistanceIndex = -1;
+            let maxDistanceSourceIndex = -1;
+            let endDistanceKm = 0;
+
+            for (let i = 0; i < checkpoints.length; i++) {
+                const displacementKm = turf.distance(
+                    turf.point(startPoint),
+                    turf.point(checkpoints[i].point),
+                    { units: 'kilometers' }
+                );
+
+                if (displacementKm > maxDistanceKm) {
+                    maxDistanceKm = displacementKm;
+                    maxDistanceIndex = i;
+                    maxDistanceSourceIndex = checkpoints[i].sourceIndex;
+                }
+
+                if (i === checkpoints.length - 1) {
+                    endDistanceKm = displacementKm;
+                }
+            }
+
+            if (!Number.isFinite(maxDistanceKm) || maxDistanceKm < 0) {
+                return {
+                    ...emptyStats,
+                    sampleCount: checkpoints.length
+                };
+            }
+
+            return {
+                sampleCount: checkpoints.length,
+                maxDistanceKm,
+                maxDistanceIndex,
+                maxDistanceSourceIndex,
+                endDistanceKm,
+                endToStartRatio: maxDistanceKm > 0 ? endDistanceKm / maxDistanceKm : 0,
+                peakProgressRatio: checkpoints.length > 1 ? maxDistanceIndex / (checkpoints.length - 1) : 1
+            };
+        }
+
+        function decideRouteMode(points, pointTimes) {
+            const roundTripStats = analyzeRoundTrip(points);
+            const timeQuality = analyzeTimeQuality(pointTimes);
+            const displacementStats = analyzeTimeOrderedDisplacement(points, pointTimes);
+
+            const geometryMode = roundTripStats.alreadyRoundTrip
+                ? 'already-round-trip'
+                : 'needs-mirror-return';
+
+            const minMeaningfulDisplacementKm = Math.max(0.15, roundTripStats.routeLengthKm * 0.12);
+            const hasMeaningfulPeak = displacementStats.maxDistanceKm >= minMeaningfulDisplacementKm;
+            const returnPhaseLikely = hasMeaningfulPeak
+                && displacementStats.peakProgressRatio <= 0.88
+                && displacementStats.endToStartRatio <= 0.45;
+            const outboundOnlyLikely = hasMeaningfulPeak
+                && displacementStats.peakProgressRatio >= 0.93
+                && displacementStats.endToStartRatio >= 0.75;
+
+            const strongTimeSignal = timeQuality.timeCoverageRatio >= 0.7
+                && timeQuality.monotonicRatio >= 0.95
+                && displacementStats.sampleCount >= 6;
+            const partialTimeSignal = !strongTimeSignal
+                && timeQuality.timeCoverageRatio >= 0.3
+                && timeQuality.monotonicRatio >= 0.8
+                && displacementStats.sampleCount >= 4;
+
+            const buildDecision = (mode, tier, reason) => ({
+                mode,
+                tier,
+                reason,
+                roundTripStats,
+                metrics: {
+                    timeCoverageRatio: timeQuality.timeCoverageRatio,
+                    monotonicRatio: timeQuality.monotonicRatio,
+                    timedPoints: timeQuality.timedPoints,
+                    totalPoints: timeQuality.totalPoints,
+                    timeSamples: displacementStats.sampleCount,
+                    maxDistanceIndex: displacementStats.maxDistanceIndex,
+                    maxDistanceSourceIndex: displacementStats.maxDistanceSourceIndex,
+                    maxDistanceKm: displacementStats.maxDistanceKm,
+                    peakProgressRatio: displacementStats.peakProgressRatio,
+                    endDistanceKm: displacementStats.endDistanceKm,
+                    endToStartRatio: displacementStats.endToStartRatio
+                }
+            });
+
+            if (strongTimeSignal) {
+                if (returnPhaseLikely) {
+                    return buildDecision('already-round-trip', 'time-rich', 'time-return-phase-detected');
+                }
+                if (outboundOnlyLikely) {
+                    return buildDecision('needs-mirror-return', 'time-rich', 'time-outbound-detected');
+                }
+                return buildDecision(geometryMode, 'time-rich', 'time-ambiguous-geometry-check');
+            }
+
+            if (partialTimeSignal) {
+                if (returnPhaseLikely && !outboundOnlyLikely) {
+                    return buildDecision('already-round-trip', 'partial-time', 'partial-time-return-signal');
+                }
+                if (outboundOnlyLikely && !returnPhaseLikely) {
+                    return buildDecision('needs-mirror-return', 'partial-time', 'partial-time-outbound-signal');
+                }
+                return buildDecision(geometryMode, 'partial-time', 'partial-time-geometry-fallback');
+            }
+
+            return buildDecision(geometryMode, 'geometry-fallback', 'insufficient-time-signal');
         }
 
         async function readGpxTextFromSource(source) {
@@ -462,17 +667,25 @@
             const gpxMetadataTime = formatUtcPlus8(gpxMetadataTimeRaw);
 
             const trkpts = Array.from(xmlDoc.getElementsByTagNameNS('*', 'trkpt'));
-            const points = trkpts
+            const parsedTrackPoints = trkpts
                 .map((pt) => {
                     const lat = Number(pt.getAttribute('lat'));
                     const lon = Number(pt.getAttribute('lon'));
                     const eleNode = pt.getElementsByTagNameNS('*', 'ele')[0];
                     const ele = eleNode ? Number(eleNode.textContent) : 0;
+                    const timeNode = pt.getElementsByTagNameNS('*', 'time')[0];
+                    const timeMs = parseTrackPointTimeMs(timeNode?.textContent);
 
                     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-                    return [lon, lat, Number.isFinite(ele) ? ele : 0];
+                    return {
+                        point: [lon, lat, Number.isFinite(ele) ? ele : 0],
+                        timeMs
+                    };
                 })
                 .filter(Boolean);
+
+            const points = parsedTrackPoints.map(({ point }) => point);
+            const pointTimes = parsedTrackPoints.map(({ timeMs }) => timeMs);
 
             if (points.length < 2) {
                 throw new Error('GPX trkpt 不足，至少需要 2 個點');
@@ -480,6 +693,7 @@
 
             return {
                 points,
+                pointTimes,
                 gpxTrackName,
                 gpxMetadataTime
             };
@@ -494,11 +708,11 @@
             return normalizedName.slice(0, dotIndex);
         }
 
-        function applyLoadedRoute({ points, gpxTrackName, gpxMetadataTime, fallbackRouteTitle = defaultRouteTitleText }) {
+        function applyLoadedRoute({ points, pointTimes = [], gpxTrackName, gpxMetadataTime, fallbackRouteTitle = defaultRouteTitleText }) {
             yushanWaypoints = points;
 
-            const roundTripStats = analyzeRoundTrip(yushanWaypoints);
-            if (roundTripStats.alreadyRoundTrip) {
+            const routeDecision = decideRouteMode(yushanWaypoints, pointTimes);
+            if (routeDecision.mode === 'already-round-trip') {
                 fullRouteCoords = [...yushanWaypoints];
             } else {
                 fullRouteCoords = [...yushanWaypoints];
@@ -506,8 +720,10 @@
                     fullRouteCoords.push(yushanWaypoints[i]);
                 }
             }
+
+            const { metrics, roundTripStats } = routeDecision;
             console.info(
-                `[GPX_ROUTE_MODE] alreadyRoundTrip=${roundTripStats.alreadyRoundTrip} startEndKm=${roundTripStats.startEndDistanceKm.toFixed(3)} routeLengthKm=${roundTripStats.routeLengthKm.toFixed(3)} thresholdKm=${roundTripStats.closureThresholdKm.toFixed(3)}`
+                `[GPX_ROUTE_MODE] mode=${routeDecision.mode} tier=${routeDecision.tier} reason=${routeDecision.reason} coverage=${metrics.timeCoverageRatio.toFixed(2)} monotonic=${metrics.monotonicRatio.toFixed(2)} timed=${metrics.timedPoints}/${metrics.totalPoints} maxIdx=${metrics.maxDistanceIndex} endRatio=${metrics.endToStartRatio.toFixed(2)} geomClosed=${roundTripStats.alreadyRoundTrip} startEndKm=${roundTripStats.startEndDistanceKm.toFixed(3)} routeLengthKm=${roundTripStats.routeLengthKm.toFixed(3)} thresholdKm=${roundTripStats.closureThresholdKm.toFixed(3)}`
             );
 
             routeLine = turf.lineString(fullRouteCoords);
