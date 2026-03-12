@@ -41,14 +41,14 @@
     <div id="map"></div>
 
     <!-- 儀表板與控制列 (直接顯示) -->
-    <div id="ui-overlay" class="absolute inset-0 z-40 pointer-events-none flex flex-col justify-between p-6">
+    <div id="ui-overlay" class="absolute inset-0 z-40 pointer-events-none flex flex-col justify-between gap-3 p-3 sm:gap-4 sm:p-6">
         <!-- 頂部：數據儀表板 -->
-        <div class="flex justify-between items-start gap-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
             <div
-                class="bg-black/60 backdrop-blur-md rounded-xl p-4 border border-white/10 pointer-events-auto shadow-lg">
-                <h1 id="route-title" class="text-xl font-bold mb-1 tracking-wider text-blue-400">玉山主峰單攻</h1>
-                <p id="route-description" class="text-sm text-gray-300 mb-4"></p>
-                <div class="grid grid-cols-2 gap-6">
+                class="bg-black/60 backdrop-blur-md rounded-xl p-4 border border-white/10 pointer-events-auto shadow-lg w-full sm:w-auto sm:max-w-[520px]">
+                <h1 id="route-title" class="text-lg sm:text-xl font-bold mb-1 tracking-wider text-blue-400">玉山主峰單攻</h1>
+                <p id="route-description" class="text-xs sm:text-sm text-gray-300 mb-4"></p>
+                <div class="grid grid-cols-2 gap-4 sm:gap-6">
                     <div>
                         <p class="text-xs text-gray-400 uppercase tracking-widest">距離</p>
                         <p class="text-2xl font-mono font-bold"><span id="distance-display">0.0</span> <span
@@ -62,34 +62,34 @@
                 </div>
             </div>
             <div
-                class="bg-black/60 backdrop-blur-md rounded-xl p-4 border border-white/10 pointer-events-auto shadow-lg min-w-[220px]">
+                class="bg-black/60 backdrop-blur-md rounded-xl p-4 border border-white/10 pointer-events-auto shadow-lg w-full max-w-full sm:w-auto sm:min-w-[220px]">
                 <button id="upload-btn"
-                    class="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900/70 disabled:cursor-not-allowed text-white rounded-lg px-4 py-2 text-sm font-semibold transition">
+                    class="w-full min-h-[44px] bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900/70 disabled:cursor-not-allowed text-white rounded-lg px-4 py-2 text-sm font-semibold transition">
                     上傳 GPX
                 </button>
                 <input id="gpx-upload-input" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml"
                     class="hidden">
-                <p id="upload-status" class="text-xs text-gray-300 mt-3 leading-relaxed break-all">目前使用內建 GPX</p>
+                <p id="upload-status" class="text-xs text-gray-300 mt-3 leading-relaxed break-words">目前使用內建 GPX</p>
             </div>
         </div>
 
         <!-- 底部：播放控制 -->
-        <div class="flex justify-center pb-8">
+        <div class="flex justify-center pb-3 sm:pb-8">
             <div
-                class="bg-black/60 backdrop-blur-md rounded-full p-2 pointer-events-auto flex gap-4 border border-white/10">
+                class="bg-black/60 backdrop-blur-md rounded-full p-1.5 sm:p-2 pointer-events-auto flex gap-3 sm:gap-4 border border-white/10">
                 <button id="play-btn"
-                    class="bg-blue-600 hover:bg-blue-500 text-white rounded-full p-4 transition-transform hover:scale-105">
+                    class="bg-blue-600 hover:bg-blue-500 text-white rounded-full p-3 sm:p-4 transition-transform hover:scale-105">
                     <!-- Play Icon -->
-                    <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
+                    <svg class="w-7 h-7 sm:w-8 sm:h-8" fill="currentColor" viewBox="0 0 20 20">
                         <path fill-rule="evenodd"
                             d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
                             clip-rule="evenodd"></path>
                     </svg>
                 </button>
                 <button id="pause-btn"
-                    class="bg-gray-700 hover:bg-gray-600 text-white rounded-full p-4 hidden transition-transform hover:scale-105">
+                    class="bg-gray-700 hover:bg-gray-600 text-white rounded-full p-3 sm:p-4 hidden transition-transform hover:scale-105">
                     <!-- Pause Icon -->
-                    <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
+                    <svg class="w-7 h-7 sm:w-8 sm:h-8" fill="currentColor" viewBox="0 0 20 20">
                         <path fill-rule="evenodd"
                             d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z"
                             clip-rule="evenodd"></path>
@@ -755,7 +755,10 @@
         const ROUTE_ENDPOINT_FLAG_POLE_HEIGHT_KM = 0.016;
         const ROUTE_ENDPOINT_FLAG_WIDTH_KM = 0.012;
         const ROUTE_ENDPOINT_FLAG_HEIGHT_KM = 0.008;
-        const ROUTE_ENDPOINT_FLAG_LABEL_DROP_KM = 0.003;
+        const MOVING_POINT_RADIUS_BASE = 8;
+        const MOVING_POINT_STROKE_WIDTH = 3;
+        const ROUTE_ENDPOINT_MARKER_RADIUS_BASE = MOVING_POINT_RADIUS_BASE;
+        const ROUTE_ENDPOINT_MARKER_TEXT_SIZE = 10;
         const EMPTY_FEATURE_COLLECTION = { type: 'FeatureCollection', features: [] };
 
         function normalizeLngLat(coord) {
@@ -767,12 +770,18 @@
         }
 
         function buildEndpointFlagFeatures(marker, anchorCoord, flagSide) {
+            const isStartMarker = marker === 'A';
+            const markerColor = isStartMarker ? '#16a34a' : '#dc2626';
+            const markerHaloColor = isStartMarker ? '#14532d' : '#7f1d1d';
+            const flagColor = isStartMarker ? '#22c55e' : '#ef4444';
+            const flagShadowColor = isStartMarker ? '#166534' : '#7f1d1d';
+            const sideBearing = flagSide >= 0 ? 90 : 270;
             const anchorPoint = turf.point(anchorCoord);
             const topCoord = turf.destination(anchorPoint, ROUTE_ENDPOINT_FLAG_POLE_HEIGHT_KM, 0, { units: 'kilometers' }).geometry.coordinates;
             const flagTipCoord = turf.destination(
                 turf.point(topCoord),
                 ROUTE_ENDPOINT_FLAG_WIDTH_KM,
-                flagSide >= 0 ? 90 : 270,
+                sideBearing,
                 { units: 'kilometers' }
             ).geometry.coordinates;
             const flagBottomCoord = turf.destination(
@@ -781,15 +790,34 @@
                 180,
                 { units: 'kilometers' }
             ).geometry.coordinates;
-            const labelBaseCoord = turf.destination(
+            const applyDepthOffset = (coord, sideMultiplier = 0.12, dropMultiplier = 0.2) => {
+                const sideShiftCoord = turf.destination(
+                    turf.point(coord),
+                    ROUTE_ENDPOINT_FLAG_WIDTH_KM * sideMultiplier,
+                    sideBearing,
+                    { units: 'kilometers' }
+                ).geometry.coordinates;
+                return turf.destination(
+                    turf.point(sideShiftCoord),
+                    ROUTE_ENDPOINT_FLAG_HEIGHT_KM * dropMultiplier,
+                    180,
+                    { units: 'kilometers' }
+                ).geometry.coordinates;
+            };
+            const shadowAnchorCoord = applyDepthOffset(anchorCoord, 0.08, 0.08);
+            const shadowTopCoord = applyDepthOffset(topCoord, 0.08, 0.08);
+            const shadowFlagTopCoord = applyDepthOffset(topCoord, 0.12, 0.2);
+            const shadowFlagTipCoord = applyDepthOffset(flagTipCoord, 0.12, 0.2);
+            const shadowFlagBottomCoord = applyDepthOffset(flagBottomCoord, 0.12, 0.2);
+            const highlightTopInnerCoord = turf.destination(
                 turf.point(topCoord),
-                ROUTE_ENDPOINT_FLAG_WIDTH_KM * 0.52,
-                flagSide >= 0 ? 90 : 270,
+                ROUTE_ENDPOINT_FLAG_HEIGHT_KM * 0.28,
+                180,
                 { units: 'kilometers' }
             ).geometry.coordinates;
-            const labelCoord = turf.destination(
-                turf.point(labelBaseCoord),
-                ROUTE_ENDPOINT_FLAG_LABEL_DROP_KM,
+            const highlightTipInnerCoord = turf.destination(
+                turf.point(flagTipCoord),
+                ROUTE_ENDPOINT_FLAG_HEIGHT_KM * 0.22,
                 180,
                 { units: 'kilometers' }
             ).geometry.coordinates;
@@ -799,11 +827,45 @@
                     type: 'Feature',
                     geometry: {
                         type: 'LineString',
+                        coordinates: [shadowAnchorCoord, shadowTopCoord]
+                    },
+                    properties: {
+                        kind: 'pole-shadow',
+                        marker,
+                        markerColor,
+                        markerHaloColor,
+                        flagColor,
+                        flagShadowColor
+                    }
+                },
+                {
+                    type: 'Feature',
+                    geometry: {
+                        type: 'Polygon',
+                        coordinates: [[shadowFlagTopCoord, shadowFlagTipCoord, shadowFlagBottomCoord, shadowFlagTopCoord]]
+                    },
+                    properties: {
+                        kind: 'flag-shadow',
+                        marker,
+                        markerColor,
+                        markerHaloColor,
+                        flagColor,
+                        flagShadowColor
+                    }
+                },
+                {
+                    type: 'Feature',
+                    geometry: {
+                        type: 'LineString',
                         coordinates: [anchorCoord, topCoord]
                     },
                     properties: {
                         kind: 'pole',
-                        marker
+                        marker,
+                        markerColor,
+                        markerHaloColor,
+                        flagColor,
+                        flagShadowColor
                     }
                 },
                 {
@@ -814,18 +876,56 @@
                     },
                     properties: {
                         kind: 'flag',
-                        marker
+                        marker,
+                        markerColor,
+                        markerHaloColor,
+                        flagColor,
+                        flagShadowColor
+                    }
+                },
+                {
+                    type: 'Feature',
+                    geometry: {
+                        type: 'Polygon',
+                        coordinates: [[topCoord, flagTipCoord, highlightTipInnerCoord, highlightTopInnerCoord, topCoord]]
+                    },
+                    properties: {
+                        kind: 'flag-highlight',
+                        marker,
+                        markerColor,
+                        markerHaloColor,
+                        flagColor,
+                        flagShadowColor
                     }
                 },
                 {
                     type: 'Feature',
                     geometry: {
                         type: 'Point',
-                        coordinates: labelCoord
+                        coordinates: anchorCoord
                     },
                     properties: {
-                        kind: 'label',
-                        marker
+                        kind: 'marker-core',
+                        marker,
+                        markerColor,
+                        markerHaloColor,
+                        flagColor,
+                        flagShadowColor
+                    }
+                },
+                {
+                    type: 'Feature',
+                    geometry: {
+                        type: 'Point',
+                        coordinates: anchorCoord
+                    },
+                    properties: {
+                        kind: 'marker-label',
+                        marker,
+                        markerColor,
+                        markerHaloColor,
+                        flagColor,
+                        flagShadowColor
                     }
                 }
             ];
@@ -961,9 +1061,9 @@
                     type: 'circle',
                     source: 'point',
                     paint: {
-                        'circle-radius': 8,
+                        'circle-radius': MOVING_POINT_RADIUS_BASE,
                         'circle-color': '#3b82f6',
-                        'circle-stroke-width': 3,
+                        'circle-stroke-width': MOVING_POINT_STROKE_WIDTH,
                         'circle-stroke-color': '#ffffff'
                     }
                 });
@@ -978,6 +1078,33 @@
                 });
             }
 
+            if (!map.getLayer('route-endpoint-pole-shadows')) {
+                map.addLayer({
+                    id: 'route-endpoint-pole-shadows',
+                    type: 'line',
+                    source: ROUTE_ENDPOINT_SOURCE_ID,
+                    filter: ['==', ['get', 'kind'], 'pole-shadow'],
+                    paint: {
+                        'line-color': '#020617',
+                        'line-width': 2.2,
+                        'line-opacity': 0.35
+                    }
+                });
+            }
+
+            if (!map.getLayer('route-endpoint-flag-shadows')) {
+                map.addLayer({
+                    id: 'route-endpoint-flag-shadows',
+                    type: 'fill',
+                    source: ROUTE_ENDPOINT_SOURCE_ID,
+                    filter: ['==', ['get', 'kind'], 'flag-shadow'],
+                    paint: {
+                        'fill-color': ['get', 'flagShadowColor'],
+                        'fill-opacity': 0.58
+                    }
+                });
+            }
+
             if (!map.getLayer('route-endpoint-poles')) {
                 map.addLayer({
                     id: 'route-endpoint-poles',
@@ -985,7 +1112,7 @@
                     source: ROUTE_ENDPOINT_SOURCE_ID,
                     filter: ['==', ['get', 'kind'], 'pole'],
                     paint: {
-                        'line-color': '#ffffff',
+                        'line-color': '#f8fafc',
                         'line-width': 1.8,
                         'line-opacity': 0.95
                     }
@@ -999,8 +1126,37 @@
                     source: ROUTE_ENDPOINT_SOURCE_ID,
                     filter: ['==', ['get', 'kind'], 'flag'],
                     paint: {
-                        'fill-color': '#dc2626',
+                        'fill-color': ['get', 'flagColor'],
                         'fill-opacity': 0.95
+                    }
+                });
+            }
+
+            if (!map.getLayer('route-endpoint-flag-highlights')) {
+                map.addLayer({
+                    id: 'route-endpoint-flag-highlights',
+                    type: 'fill',
+                    source: ROUTE_ENDPOINT_SOURCE_ID,
+                    filter: ['==', ['get', 'kind'], 'flag-highlight'],
+                    paint: {
+                        'fill-color': '#ffffff',
+                        'fill-opacity': 0.22
+                    }
+                });
+            }
+
+            if (!map.getLayer('route-endpoint-markers')) {
+                map.addLayer({
+                    id: 'route-endpoint-markers',
+                    type: 'circle',
+                    source: ROUTE_ENDPOINT_SOURCE_ID,
+                    filter: ['==', ['get', 'kind'], 'marker-core'],
+                    paint: {
+                        'circle-radius': ROUTE_ENDPOINT_MARKER_RADIUS_BASE,
+                        'circle-color': ['get', 'markerColor'],
+                        'circle-stroke-width': MOVING_POINT_STROKE_WIDTH,
+                        'circle-stroke-color': '#ffffff',
+                        'circle-opacity': 0.98
                     }
                 });
             }
@@ -1010,17 +1166,17 @@
                     id: 'route-endpoint-labels',
                     type: 'symbol',
                     source: ROUTE_ENDPOINT_SOURCE_ID,
-                    filter: ['==', ['get', 'kind'], 'label'],
+                    filter: ['==', ['get', 'kind'], 'marker-label'],
                     layout: {
                         'text-field': ['get', 'marker'],
-                        'text-size': 10,
+                        'text-size': ROUTE_ENDPOINT_MARKER_TEXT_SIZE,
                         'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
                         'text-allow-overlap': true
                     },
                     paint: {
                         'text-color': '#ffffff',
-                        'text-halo-color': '#991b1b',
-                        'text-halo-width': 1.2
+                        'text-halo-color': ['get', 'markerHaloColor'],
+                        'text-halo-width': 1.3
                     }
                 });
             }
