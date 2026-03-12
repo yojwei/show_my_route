@@ -717,18 +717,11 @@
             routeEndpointEndAnchor = normalizedRawCoords.length >= 1 ? normalizedRawCoords[normalizedRawCoords.length - 1] : null;
 
             const routeDecision = decideRouteMode(yushanWaypoints, pointTimes);
-            if (routeDecision.mode === 'already-round-trip') {
-                fullRouteCoords = [...yushanWaypoints];
-            } else {
-                fullRouteCoords = [...yushanWaypoints];
-                for (let i = yushanWaypoints.length - 2; i >= 0; i--) {
-                    fullRouteCoords.push(yushanWaypoints[i]);
-                }
-            }
+            fullRouteCoords = [...yushanWaypoints];
 
             const { metrics, roundTripStats } = routeDecision;
             console.info(
-                `[GPX_ROUTE_MODE] mode=${routeDecision.mode} tier=${routeDecision.tier} reason=${routeDecision.reason} coverage=${metrics.timeCoverageRatio.toFixed(2)} monotonic=${metrics.monotonicRatio.toFixed(2)} timed=${metrics.timedPoints}/${metrics.totalPoints} maxIdx=${metrics.maxDistanceIndex} endRatio=${metrics.endToStartRatio.toFixed(2)} geomClosed=${roundTripStats.alreadyRoundTrip} startEndKm=${roundTripStats.startEndDistanceKm.toFixed(3)} routeLengthKm=${roundTripStats.routeLengthKm.toFixed(3)} thresholdKm=${roundTripStats.closureThresholdKm.toFixed(3)}`
+                `[GPX_ROUTE_MODE] mode=${routeDecision.mode} playbackPath=raw-forward mirrorApplied=false tier=${routeDecision.tier} reason=${routeDecision.reason} coverage=${metrics.timeCoverageRatio.toFixed(2)} monotonic=${metrics.monotonicRatio.toFixed(2)} timed=${metrics.timedPoints}/${metrics.totalPoints} maxIdx=${metrics.maxDistanceIndex} endRatio=${metrics.endToStartRatio.toFixed(2)} geomClosed=${roundTripStats.alreadyRoundTrip} startEndKm=${roundTripStats.startEndDistanceKm.toFixed(3)} routeLengthKm=${roundTripStats.routeLengthKm.toFixed(3)} thresholdKm=${roundTripStats.closureThresholdKm.toFixed(3)}`
             );
 
             routeLine = turf.lineString(fullRouteCoords);
