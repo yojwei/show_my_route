@@ -49,17 +49,25 @@ python -m http.server 5500
 # 接著開啟 http://localhost:5500
 ```
 
-開啟後地圖會自動載入預設路線，首末點顯示紅色 **A/B** 旗標，點擊畫面下方的播放圖示按鈕（▶）即可開始動畫。
+或以任意靜態檔案伺服器提供服務，例如：
+
+```bash
+# Python 3
+python -m http.server 8080
+# 接著開啟 http://localhost:8080
+```
+
+開啟後地圖會自動載入，路線原始首末點會顯示 **A=綠色、B=紅色** 端點標記與旗標（上傳新 GPX 後也會同步更新），點擊畫面下方的 **▶ 播放** 按鈕即可開始動畫。
 
 ---
 
 ## 依賴項目（全部來自 CDN，無需安裝）
 
-| 套件 | 版本 | 用途 |
-|------|------|------|
-| [MapLibre GL JS](https://maplibre.org/) | 2.4.0 | 3D 地圖渲染 |
-| [Turf.js](https://turfjs.org/) | 6.x | 地理空間計算（距離、方向、內插） |
-| [Tailwind CSS](https://tailwindcss.com/) | CDN | UI 排版樣式 |
+| 套件                                     | 版本  | 用途                             |
+| ---------------------------------------- | ----- | -------------------------------- |
+| [MapLibre GL JS](https://maplibre.org/)  | 2.4.0 | 3D 地圖渲染                      |
+| [Turf.js](https://turfjs.org/)           | 6.x   | 地理空間計算（距離、方向、內插） |
+| [Tailwind CSS](https://tailwindcss.com/) | CDN   | UI 排版樣式                      |
 
 ---
 
