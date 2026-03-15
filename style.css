@@ -1,10 +1,4 @@
-body {
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-    background-color: #111;
-}
-
+/* 讓地圖填滿整個螢幕 */
 #map {
     position: absolute;
     top: 0;
@@ -12,8 +6,16 @@ body {
     width: 100%;
 }
 
-/* 隱藏 MapLibre 預設的 UI 元件 */
-.maplibregl-ctrl-top-right,
-.maplibregl-ctrl-bottom-right {
-    display: none !important;
+/* 確保 body 沒有邊距 */
+body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #000;
+}
+
+/* 針對行動裝置優化 UI 文字不被選取 */
+#ui-overlay {
+    user-select: none;
+    -webkit-user-select: none;
 }
