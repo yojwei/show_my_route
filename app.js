@@ -72,6 +72,29 @@ function initMap() {
     });
 }
 
+function getFallbackElevation(point) {
+    const fallbackCandidates = [
+        point?.properties?.ele,
+        point?.properties?.elevation,
+        point?.properties?.altitude,
+        point?.geometry?.coordinates?.[2]
+    ];
+    const fallback = fallbackCandidates.find(value => Number.isFinite(Number(value)));
+    return fallback !== undefined ? Number(fallback) : null;
+}
+
+function getPointElevation(point) {
+    const coordinates = point?.geometry?.coordinates;
+    let terrainElevation = null;
+
+    if (typeof map?.queryTerrainElevation === 'function' && Array.isArray(coordinates)) {
+        terrainElevation = map.queryTerrainElevation(coordinates);
+    }
+
+    if (Number.isFinite(terrainElevation)) return terrainElevation;
+    return getFallbackElevation(point);
+}
+
 // --- 3. 動畫控制 ---
 function animate(timestamp) {
     if (!isPlaying) return;
@@ -95,13 +118,9 @@ function animate(timestamp) {
     map.getSource('point').setData(currentPoint);
 
     distanceDisplay.innerText = currentDistance.toFixed(2);
-    let elev = null;
-    try {
-        elev = map.queryTerrainElevation(currentPoint.geometry.coordinates);
-    } catch (e) {
-        console.warn("海拔查詢暫時失效");
-    }
-    elevationDisplay.innerText = elev ? Math.floor(elev) : "---";   
+
+    const elev = getPointElevation(currentPoint);
+    elevationDisplay.innerText = Number.isFinite(elev) ? Math.floor(elev) : "---";
 
     map.jumpTo({ center: currentPoint.geometry.coordinates, pitch: 65, zoom: 15 });
     animationId = requestAnimationFrame(animate);

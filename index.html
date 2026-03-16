@@ -215,6 +215,29 @@
             document.getElementById('route-subtitle').innerText = `包含 ${coords.length} 個點位`;
         }
 
+        function getFallbackElevation(point) {
+            const fallbackCandidates = [
+                point?.properties?.ele,
+                point?.properties?.elevation,
+                point?.properties?.altitude,
+                point?.geometry?.coordinates?.[2]
+            ];
+            const fallback = fallbackCandidates.find(value => Number.isFinite(Number(value)));
+            return fallback !== undefined ? Number(fallback) : null;
+        }
+
+        function getPointElevation(point) {
+            const coordinates = point?.geometry?.coordinates;
+            let terrainElevation = null;
+
+            if (typeof map?.queryTerrainElevation === 'function' && Array.isArray(coordinates)) {
+                terrainElevation = map.queryTerrainElevation(coordinates);
+            }
+
+            if (Number.isFinite(terrainElevation)) return terrainElevation;
+            return getFallbackElevation(point);
+        }
+
         // 動畫循環
         function animate(timestamp) {
             if (!isPlaying) {
@@ -244,8 +267,8 @@
                 map.getSource('point').setData(point);
                 distanceDisplay.innerText = currentDistance.toFixed(2);
                 
-                const elev = map.queryTerrainElevation(point.geometry.coordinates);
-                elevationDisplay.innerText = elev ? Math.floor(elev) : "---";
+                const elev = getPointElevation(point);
+                elevationDisplay.innerText = Number.isFinite(elev) ? Math.floor(elev) : "---";
 
                 map.jumpTo({
                     center: point.geometry.coordinates,
