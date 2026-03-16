@@ -54,7 +54,7 @@ function initMap() {
             version: 8,
             sources: {
                 'satellite': { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256 },
-                'terrain-source': { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], encoding: 'terrarium', tileSize: 256 }
+                //'terrain-source': { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], encoding: 'terrarium', tileSize: 256 }
             },
             layers: [{ id: 'satellite-layer', type: 'raster', source: 'satellite' }],
             terrain: { source: 'terrain-source', exaggeration: 1.5 }
@@ -95,8 +95,13 @@ function animate(timestamp) {
     map.getSource('point').setData(currentPoint);
 
     distanceDisplay.innerText = currentDistance.toFixed(2);
-    const elev = map.queryTerrainElevation(currentPoint.geometry.coordinates);
-    elevationDisplay.innerText = elev ? Math.floor(elev) : "---";
+    let elev = null;
+    try {
+        elev = map.queryTerrainElevation(currentPoint.geometry.coordinates);
+    } catch (e) {
+        console.warn("海拔查詢暫時失效");
+    }
+    elevationDisplay.innerText = elev ? Math.floor(elev) : "---";   
 
     map.jumpTo({ center: currentPoint.geometry.coordinates, pitch: 65, zoom: 15 });
     animationId = requestAnimationFrame(animate);
