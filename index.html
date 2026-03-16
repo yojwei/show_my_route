@@ -4,13 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3D 路線動畫製作工具</title>
-    <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
-    <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
-    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
-    <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />   
     <style>
         body { margin: 0; padding: 0; overflow: hidden; background: #000; }
         #map { position: absolute; top: 0; bottom: 0; width: 100%; }
@@ -104,8 +102,15 @@
         let animationId = null;
         let lastTime = 0;
         let playbackSpeed = 1;
+        let photoFeatures = [];
+        let noGpsPhotos = [];
+        let activePopup = null;
 
-        const distanceDisplay = document.getElementById('distance-display');
+        function escHtml(str) {
+            return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        const distanceDisplay= document.getElementById('distance-display');
         const elevationDisplay = document.getElementById('elevation-display');
         const playBtn = document.getElementById('play-btn');
         const pauseBtn = document.getElementById('pause-btn');
@@ -159,45 +164,177 @@
                     source: 'point',
                     paint: { 'circle-radius': 8, 'circle-color': '#fff', 'circle-stroke-width': 3, 'circle-stroke-color': '#3b82f6' }
                 });
+
+                map.addSource('photos', {
+                    type: 'geojson',
+                    data: { type: 'FeatureCollection', features: [] },
+                    cluster: true,
+                    clusterMaxZoom: 14,
+                    clusterRadius: 50
+                });
+                map.addLayer({
+                    id: 'photo-clusters',
+                    type: 'circle',
+                    source: 'photos',
+                    filter: ['has', 'point_count'],
+                    paint: {
+                        'circle-color': ['step', ['get', 'point_count'], '#3b82f6', 10, '#f59e0b', 30, '#ef4444'],
+                        'circle-radius': ['step', ['get', 'point_count'], 20, 10, 30, 30, 40],
+                        'circle-opacity': 0.85,
+                        'circle-stroke-width': 2,
+                        'circle-stroke-color': '#fff'
+                    }
+                });
+                map.addLayer({
+                    id: 'photo-cluster-count',
+                    type: 'symbol',
+                    source: 'photos',
+                    filter: ['has', 'point_count'],
+                    layout: {
+                        'text-field': '{point_count_abbreviated}',
+                        'text-size': 13,
+                        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold']
+                    },
+                    paint: { 'text-color': '#fff' }
+                });
+                map.addLayer({
+                    id: 'photo-markers',
+                    type: 'circle',
+                    source: 'photos',
+                    filter: ['!', ['has', 'point_count']],
+                    paint: {
+                        'circle-radius': 10,
+                        'circle-color': '#fff',
+                        'circle-stroke-width': 3,
+                        'circle-stroke-color': '#3b82f6'
+                    }
+                });
+
+                map.on('click', 'photo-clusters', async (e) => {
+                    const features = map.queryRenderedFeatures(e.point, { layers: ['photo-clusters'] });
+                    if (!features.length) return;
+                    const clusterId = features[0].properties.cluster_id;
+                    try {
+                        const zoom = await map.getSource('photos').getClusterExpansionZoom(clusterId);
+                        map.easeTo({ center: features[0].geometry.coordinates, zoom });
+                    } catch (err) { console.warn('Cluster expansion failed:', err); }
+                });
+
+                map.on('click', 'photo-markers', (e) => {
+                    const props = e.features[0].properties;
+                    const coords = e.features[0].geometry.coordinates.slice();
+                    if (activePopup) activePopup.remove();
+                    activePopup = new maplibregl.Popup({ maxWidth: '220px' })
+                        .setLngLat(coords)
+                        .setHTML(`
+                            <div style="text-align:center">
+                                <img src="${props.objectUrl}" style="width:200px;height:150px;object-fit:cover;border-radius:6px;margin-bottom:6px">
+                                <div style="font-size:11px;color:#ccc">${escHtml(props.name)}</div>
+                                <div style="font-size:11px;color:#9ca3af">${escHtml(props.time) || '時間不明'}</div>
+                            </div>
+                        `)
+                        .addTo(map);
+                });
+
+                map.on('mouseenter', 'photo-clusters', () => map.getCanvas().style.cursor = 'pointer');
+                map.on('mouseleave', 'photo-clusters', () => map.getCanvas().style.cursor = '');
+                map.on('mouseenter', 'photo-markers', () => map.getCanvas().style.cursor = 'pointer');
+                map.on('mouseleave', 'photo-markers', () => map.getCanvas().style.cursor = '');
             });
         }
 
         // 處理照片上傳
         document.getElementById('photo-upload').addEventListener('change', async (e) => {
             const files = Array.from(e.target.files);
-            if (files.length < 2) return alert("請至少上傳兩張照片以生成路徑");
+            if (files.length === 0) return;
+
+            const toDec = (dms, ref) => {
+                let dec = dms[0] + dms[1] / 60 + dms[2] / 3600;
+                return (ref === 'S' || ref === 'W') ? dec * -1 : dec;
+            };
 
             const metadata = await Promise.all(files.map(file => {
                 return new Promise(resolve => {
                     EXIF.getData(file, function() {
-                        const lat = EXIF.getTag(this, "GPSLatitude");
-                        const lon = EXIF.getTag(this, "GPSLongitude");
-                        const latRef = EXIF.getTag(this, "GPSLatitudeRef") || "N";
-                        const lonRef = EXIF.getTag(this, "GPSLongitudeRef") || "E";
-                        const date = EXIF.getTag(this, "DateTimeOriginal");
-                        
-                        if (lat && lon) {
-                            const toDec = (dms, ref) => {
-                                let dec = dms[0] + dms[1]/60 + dms[2]/3600;
-                                return (ref === "S" || ref === "W") ? dec * -1 : dec;
-                            };
-                            // 修正 EXIF 日期格式 YYYY:MM:DD 為 YYYY/MM/DD 供 JS 解析
-                            const formattedDate = date ? date.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1/$2/$3") : null;
-                            resolve({ coords: [toDec(lon, lonRef), toDec(lat, latRef)], time: formattedDate });
-                        } else resolve(null);
+                        const lat = EXIF.getTag(this, 'GPSLatitude');
+                        const lon = EXIF.getTag(this, 'GPSLongitude');
+                        const latRef = EXIF.getTag(this, 'GPSLatitudeRef') || 'N';
+                        const lonRef = EXIF.getTag(this, 'GPSLongitudeRef') || 'E';
+                        const date = EXIF.getTag(this, 'DateTimeOriginal');
+                        const formattedDate = date ? date.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1/$2/$3') : null;
+                        resolve({
+                            coords: (lat && lon) ? [toDec(lon, lonRef), toDec(lat, latRef)] : null,
+                            time: formattedDate,
+                            file,
+                            name: file.name
+                        });
                     });
                 });
             }));
 
-            // 依照時間排序
-            const sortedPoints = metadata
-                .filter(p => p !== null && p.time !== null)
-                .sort((a, b) => new Date(a.time) - new Date(b.time));
+            // Release old object URLs to avoid memory leaks
+            if (activePopup) { activePopup.remove(); activePopup = null; }
+            photoFeatures.forEach(f => URL.revokeObjectURL(f.properties.objectUrl));
+            photoFeatures = [];
+            noGpsPhotos = [];
 
-            if (sortedPoints.length < 2) return alert("照片中無足夠 GPS 或時間資訊");
+            metadata.forEach((m, i) => {
+                if (!m.coords) {
+                    noGpsPhotos.push({ name: m.name, time: m.time });
+                    return;
+                }
+                photoFeatures.push({
+                    type: 'Feature',
+                    geometry: { type: 'Point', coordinates: m.coords },
+                    properties: {
+                        id: `photo-${i}`,
+                        name: m.name,
+                        time: m.time,
+                        objectUrl: URL.createObjectURL(m.file)
+                    }
+                });
+            });
 
-            const coords = sortedPoints.map(p => p.coords);
-            updateRoute(coords);
+            const photosSource = map.getSource('photos');
+            if (photosSource) photosSource.setData({ type: 'FeatureCollection', features: photoFeatures });
+
+            // Update no-GPS warning
+            let noGpsWarning = document.getElementById('no-gps-warning');
+            if (!noGpsWarning) {
+                noGpsWarning = document.createElement('p');
+                noGpsWarning.id = 'no-gps-warning';
+                noGpsWarning.className = 'text-xs text-yellow-400 mt-2';
+                document.getElementById('route-subtitle').after(noGpsWarning);
+            }
+            noGpsWarning.textContent = noGpsPhotos.length > 0
+                ? `⚠ ${noGpsPhotos.length} 張無 GPS：${noGpsPhotos.map(p => p.name).join('、')}`
+                : '';
+
+            // Sort GPS photos by time (photos without time go last)
+            const sortedPoints = photoFeatures
+                .map(f => ({ coords: f.geometry.coordinates, time: f.properties.time }))
+                .sort((a, b) => {
+                    if (!a.time) return 1;
+                    if (!b.time) return -1;
+                    return new Date(a.time) - new Date(b.time);
+                });
+
+            if (sortedPoints.length >= 2) {
+                updateRoute(sortedPoints.map(p => p.coords));
+            } else {
+                routeLine = null;
+                const routeSource = map.getSource('route');
+                if (routeSource) routeSource.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } });
+                const pointSource = map.getSource('point');
+                if (pointSource) pointSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [] } });
+                if (sortedPoints.length === 1) {
+                    document.getElementById('route-subtitle').innerText = '包含 1 個點位（需至少 2 個點才能生成路線）';
+                } else {
+                    document.getElementById('route-subtitle').innerText = '照片中無足夠 GPS 資訊以生成路線';
+                }
+            }
+
+            e.target.value = '';
         });
 
         function updateRoute(coords) {
@@ -208,7 +345,10 @@
             lastTime = 0; // 重置動畫時間戳
             toggleButtons();
 
-            map.getSource('route').setData(routeLine);
+            const routeSource = map.getSource('route');
+            if (routeSource) routeSource.setData(routeLine);
+            const pointSource = map.getSource('point');
+            if (pointSource) pointSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [] } });
             const bbox = turf.bbox(routeLine);
             map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 80, duration: 2000 });
 
