@@ -1,5 +1,8 @@
 # 照片地圖標記實作計畫（plan-map）
 
+> **狀態**：✅ 已完成  
+> **進度**：Phase 0~7 全部完成，並已完成驗證。
+
 ## 1. 背景與目標
 
 ### 背景
@@ -218,9 +221,9 @@ map.on('mouseleave', 'photo-markers', () => map.getCanvas().style.cursor = '');
 
 ### Phase 0：前置準備（不改現有邏輯，僅擴充）
 
-- [ ] 在全域宣告區新增 `photoFeatures = []` 與 `noGpsPhotos = []`。
-- [ ] 在 `map.on('load', ...)` 結尾新增 `photos` source 與三個 layer（clusters / count / markers）。
-- [ ] 確認 MapLibre 版本衝突：移除 `index.html` 第 7–8 行重複引用的 v2.4.0（保留 v3.6.2）；確認 `cluster` API 在 3.6.2 正常可用（已驗証支援）。
+- [x] 在全域宣告區新增 `photoFeatures = []` 與 `noGpsPhotos = []`。
+- [x] 在 `map.on('load', ...)` 結尾新增 `photos` source 與三個 layer（clusters / count / markers）。
+- [x] 確認 MapLibre 版本衝突：移除 `index.html` 第 7–8 行重複引用的 v2.4.0（保留 v3.6.2）；確認 `cluster` API 在 3.6.2 正常可用（已驗証支援）。
 
 ### Phase 1：擴充 EXIF 解析，保留 File 物件
 

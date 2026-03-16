@@ -210,15 +210,19 @@
                     }
                 });
 
-                map.on('click', 'photo-clusters', async (e) => {
-                    const features = map.queryRenderedFeatures(e.point, { layers: ['photo-clusters'] });
+                const expandCluster = async (e) => {
+                    const features = map.queryRenderedFeatures(e.point, { layers: ['photo-clusters', 'photo-cluster-count'] });
                     if (!features.length) return;
-                    const clusterId = features[0].properties.cluster_id;
+                    const clusterId = Number(features[0].properties.cluster_id);
+                    const photosSource = map.getSource('photos');
+                    if (!photosSource || Number.isNaN(clusterId)) return;
                     try {
-                        const zoom = await map.getSource('photos').getClusterExpansionZoom(clusterId);
+                        const zoom = await photosSource.getClusterExpansionZoom(clusterId);
                         map.easeTo({ center: features[0].geometry.coordinates, zoom });
                     } catch (err) { console.warn('Cluster expansion failed:', err); }
-                });
+                };
+                map.on('click', 'photo-clusters', expandCluster);
+                map.on('click', 'photo-cluster-count', expandCluster);
 
                 map.on('click', 'photo-markers', (e) => {
                     const props = e.features[0].properties;
@@ -236,10 +240,14 @@
                         .addTo(map);
                 });
 
-                map.on('mouseenter', 'photo-clusters', () => map.getCanvas().style.cursor = 'pointer');
-                map.on('mouseleave', 'photo-clusters', () => map.getCanvas().style.cursor = '');
-                map.on('mouseenter', 'photo-markers', () => map.getCanvas().style.cursor = 'pointer');
-                map.on('mouseleave', 'photo-markers', () => map.getCanvas().style.cursor = '');
+                const setPointerCursor = () => map.getCanvas().style.cursor = 'pointer';
+                const clearPointerCursor = () => map.getCanvas().style.cursor = '';
+                map.on('mouseenter', 'photo-clusters', setPointerCursor);
+                map.on('mouseleave', 'photo-clusters', clearPointerCursor);
+                map.on('mouseenter', 'photo-cluster-count', setPointerCursor);
+                map.on('mouseleave', 'photo-cluster-count', clearPointerCursor);
+                map.on('mouseenter', 'photo-markers', setPointerCursor);
+                map.on('mouseleave', 'photo-markers', clearPointerCursor);
             });
         }
 
@@ -314,6 +322,7 @@
             const sortedPoints = photoFeatures
                 .map(f => ({ coords: f.geometry.coordinates, time: f.properties.time }))
                 .sort((a, b) => {
+                    if (!a.time && !b.time) return 0;
                     if (!a.time) return 1;
                     if (!b.time) return -1;
                     return new Date(a.time) - new Date(b.time);
@@ -323,10 +332,21 @@
                 updateRoute(sortedPoints.map(p => p.coords));
             } else {
                 routeLine = null;
+                isPlaying = false;
+                lastTime = 0;
+                currentDistance = 0;
+                totalDistance = 0;
+                toggleButtons();
+                if (animationId) {
+                    cancelAnimationFrame(animationId);
+                    animationId = null;
+                }
                 const routeSource = map.getSource('route');
                 if (routeSource) routeSource.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } });
                 const pointSource = map.getSource('point');
                 if (pointSource) pointSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [] } });
+                distanceDisplay.innerText = '0.0';
+                elevationDisplay.innerText = '---';
                 if (sortedPoints.length === 1) {
                     document.getElementById('route-subtitle').innerText = '包含 1 個點位（需至少 2 個點才能生成路線）';
                 } else {
