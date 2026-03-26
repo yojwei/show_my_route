@@ -5,7 +5,9 @@ let totalDistance = 0;
 let currentDistance = 0;
 let isPlaying = false;
 let lastTime = 0;
-let playbackSpeed = 1.0; 
+let playbackSpeed = 1.0;
+let photos = []; // 儲存照片資料
+let shownPhotos = new Set(); // 記錄已顯示的照片索引，避免重複顯示 
 
 // DOM 元素
 const routeTitle = document.getElementById('route-title');
