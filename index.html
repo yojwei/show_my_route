@@ -30,7 +30,7 @@
                         contenteditable="true" 
                         spellcheck="false"
                         title="點擊修改軌跡名稱">
-                        待上傳軌跡
+                        命名您的路徑
                     </h1>
                     <svg class="w-4 h-4 text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
@@ -115,6 +115,8 @@
         let noGpsPhotos = [];
         let activePopup = null;
         let photoCardTimeout = null;
+        let photoDateRange = { min: null, max: null };
+        let photoDisplayPoints = [];
         const photoCard = document.getElementById('photo-card');
         const photoCardImg = document.getElementById('photo-card-img');
         const photoCardLabel = document.getElementById('photo-card-label');
@@ -344,6 +346,20 @@
                         objectUrl: URL.createObjectURL(m.file)
                     }
                 });
+            });
+
+            // 建立分享用點陣與日期範圍
+            photoDisplayPoints = photoFeatures.map(f => {
+              const timeStr = f.properties.time || null;
+              const dateObj = timeStr ? new Date(timeStr) : null;
+              return { lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], objectUrl: f.properties.objectUrl, time: timeStr, date: isNaN(dateObj) ? null : dateObj };
+            });
+
+            photoDateRange = { min: null, max: null };
+            photoDisplayPoints.forEach(p => {
+              if (!p.date) return;
+              if (!photoDateRange.min || p.date < photoDateRange.min) photoDateRange.min = p.date;
+              if (!photoDateRange.max || p.date > photoDateRange.max) photoDateRange.max = p.date;
             });
 
             const photosSource = map.getSource('photos');
@@ -602,12 +618,115 @@
         });
 
         // 截圖下載
-        document.getElementById('share-btn').addEventListener('click', () => {
-            const dataUrl = map.getCanvas().toDataURL('image/png');
-            const link = document.createElement('a');
-            link.download = 'hiking-3d-route.png';
-            link.href = dataUrl;
-            link.click();
+        function formatDateSlash(date) {
+          if (!date) return null;
+          const y = date.getFullYear().toString().padStart(4, '0');
+          const m = (date.getMonth() + 1).toString().padStart(2, '0');
+          const d = date.getDate().toString().padStart(2, '0');
+          return `${y}/${m}/${d}`;
+        }
+
+        function drawImageFromUrl(ctx, url, x, y, w, h) {
+          return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+              ctx.drawImage(img, x, y, w, h);
+              resolve();
+            };
+            img.onerror = () => resolve(); // 失敗就跳過
+            img.src = url;
+          });
+        }
+
+        function getNonOverlappingPhotoPositions(map, points) {
+          const placed = [];
+          const size = 50;
+          const gap = 8;
+          for (const p of points) {
+            const proj = map.project([p.lon, p.lat]);
+            let x = Math.round(proj.x - size / 2);
+            let y = Math.round(proj.y - size / 2);
+            let attempts = 0;
+            while (attempts < 30) {
+              const collide = placed.some(o => !(x + size + gap < o.x || x > o.x + size + gap || y + size + gap < o.y || y > o.y + size + gap));
+              if (!collide) break;
+              x += 18;
+              y -= 18;
+              attempts++;
+            }
+            if (x < 0) x = 0;
+            if (y < 0) y = 0;
+            const maxX = map.getCanvas().width - size;
+            const maxY = map.getCanvas().height - size;
+            if (x > maxX) x = maxX;
+            if (y > maxY) y = maxY;
+            placed.push({ x, y, objectUrl: p.objectUrl });
+          }
+          return placed;
+        }
+
+        document.getElementById('share-btn').addEventListener('click', async () => {
+          const mapCanvas = map.getCanvas();
+          const width = mapCanvas.width;
+          const height = mapCanvas.height;
+          const shareCanvas = document.createElement('canvas');
+          shareCanvas.width = width;
+          shareCanvas.height = height;
+          const ctx = shareCanvas.getContext('2d');
+
+          // 地圖底圖
+          ctx.drawImage(mapCanvas, 0, 0, width, height);
+
+          // 照片縮圖疊加（互不重疊）
+          const displayPoints = getNonOverlappingPhotoPositions(map, photoDisplayPoints);
+          for (const p of displayPoints) {
+            const sx = p.x;
+            const sy = p.y;
+            const s = 50;
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(sx + 8, sy);
+            ctx.lineTo(sx + s - 8, sy);
+            ctx.quadraticCurveTo(sx + s, sy, sx + s, sy + 8);
+            ctx.lineTo(sx + s, sy + s - 8);
+            ctx.quadraticCurveTo(sx + s, sy + s, sx + s - 8, sy + s);
+            ctx.lineTo(sx + 8, sy + s);
+            ctx.quadraticCurveTo(sx, sy + s, sx, sy + s - 8);
+            ctx.lineTo(sx, sy + 8);
+            ctx.quadraticCurveTo(sx, sy, sx + 8, sy);
+            ctx.closePath();
+            ctx.clip();
+            await drawImageFromUrl(ctx, p.objectUrl, sx, sy, s, s);
+            ctx.restore();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
+
+          // 右下文字區
+          const routeName = (routeTitle.innerText || '命名您的路徑').trim() || '命名您的路徑';
+          const dateText = (photoDateRange.min && photoDateRange.max)
+            ? `${formatDateSlash(photoDateRange.min)}-${formatDateSlash(photoDateRange.max)}`
+            : '日期不明';
+          const padding = 24;
+          ctx.font = 'bold 20px sans-serif';
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'bottom';
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+          ctx.shadowBlur = 6;
+          const line1 = routeName;
+          const line2 = dateText;
+          ctx.fillText(line2, width - padding, height - padding);
+          ctx.font = 'bold 24px sans-serif';
+          ctx.fillText(line1, width - padding, height - padding - 28);
+
+          // 導出下載
+          const dataUrl = shareCanvas.toDataURL('image/png');
+          const link = document.createElement('a');
+          link.download = 'hiking-3d-route.png';
+          link.href = dataUrl;
+          link.click();
         });
     </script>
 </body>
