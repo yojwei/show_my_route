@@ -167,7 +167,7 @@
             map.on('load', () => {
                 map.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
                 map.addLayer({
-                    id: 'route-line',
+                    id: 'route-preview',
                     type: 'line',
                     source: 'route',
                     paint: {
@@ -404,6 +404,8 @@
                 }
                 const routeSource = map.getSource('route');
                 if (routeSource) routeSource.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } });
+                const progressSource = map.getSource('route-progress');
+                if (progressSource) progressSource.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } });
                 const pointSource = map.getSource('point');
                 if (pointSource) pointSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [] } });
                 distanceDisplay.innerText = '0.0';
