@@ -15,6 +15,11 @@ const distanceDisplay = document.getElementById('distance-display');
 const elevationDisplay = document.getElementById('elevation-display');
 const playBtn = document.getElementById('play-btn');
 const pauseBtn = document.getElementById('pause-btn');
+const photoCard = document.getElementById('photo-card');
+const photoCardImg = document.getElementById('photo-card-img');
+const photoCardLabel = document.getElementById('photo-card-label');
+const photoCardClose = document.getElementById('photo-card-close');
+let photoCardTimeout = null;
 
 // --- 1. 核心處理 ---
 function getPhotoMetadata(file) {
@@ -97,6 +102,56 @@ function getPointElevation(point) {
     return getFallbackElevation(point);
 }
 
+function showPhotoCard({ url, time }, index) {
+    if (!photoCard) return;
+    photoCardImg.src = url;
+    photoCardLabel.textContent = `照片 #${index + 1} · ${time.toLocaleString()}`;
+    photoCard.classList.remove('hidden');
+
+    // 暫停動畫，3秒後關閉並恢復播放
+    if (isPlaying) {
+        isPlaying = false;
+        toggleButtons();
+        cancelAnimationFrame(animationId);
+    }
+
+    if (photoCardTimeout) clearTimeout(photoCardTimeout);
+    photoCardTimeout = setTimeout(() => {
+        hidePhotoCard();
+        isPlaying = true;
+        toggleButtons();
+        lastTime = 0;
+        animationId = requestAnimationFrame(animate);
+    }, 3000);
+}
+
+function hidePhotoCard() {
+    if (!photoCard) return;
+    photoCard.classList.add('hidden');
+    if (photoCardTimeout) {
+        clearTimeout(photoCardTimeout);
+        photoCardTimeout = null;
+    }
+}
+
+function checkAndShowPhoto(currentPoint) {
+    if (!photos || photos.length === 0) return;
+    // 已顯示過或正在顯示的直接跳過
+    if (!photoCard || !photoCard.classList.contains('hidden')) return;
+
+    for (let i = 0; i < photos.length; i++) {
+        if (shownPhotos.has(i)) continue;
+
+        const photoPoint = turf.point(photos[i].coords);
+        const distanceKm = turf.distance(currentPoint, photoPoint, { units: 'kilometers' });
+        if (distanceKm <= 0.05) { // 50 公尺標準
+            shownPhotos.add(i);
+            showPhotoCard(photos[i], i);
+            break;
+        }
+    }
+}
+
 // --- 3. 動畫控制 ---
 function animate(timestamp) {
     if (!isPlaying) return;
@@ -121,7 +176,7 @@ function animate(timestamp) {
 
     distanceDisplay.innerText = currentDistance.toFixed(2);
 
-    const elev = getPointElevation(currentPoint);
+const elev = getPointElevation(currentPoint);
     elevationDisplay.innerText = Number.isFinite(elev) ? Math.floor(elev) : "---";
 
     map.jumpTo({ center: currentPoint.geometry.coordinates, pitch: 65, zoom: 15 });
@@ -137,11 +192,38 @@ function toggleButtons() {
 document.getElementById('photo-upload').addEventListener('change', async (e) => {
     const files = Array.from(e.target.files);
     if (files.length < 2) return alert("請至少選擇兩張照片");
-    const metadataList = await Promise.all(files.map(getPhotoMetadata));
-    const sortedCoords = metadataList.filter(d => d !== null).sort((a, b) => a.time - b.time).map(i => i.coords);
+
+    const metaResults = await Promise.all(files.map(getPhotoMetadata));
+    photos = [];
+    const noGpsPhotos = [];
+
+    for (let i = 0; i < files.length; i++) {
+        const meta = metaResults[i];
+        if (meta) {
+            photos.push({ coords: meta.coords, time: meta.time, url: URL.createObjectURL(files[i]) });
+        } else {
+            noGpsPhotos.push(files[i]);
+        }
+    }
+
+    if (photos.length < 2) {
+        return alert("至少需要兩張有GPS資訊的照片來製作路線");
+    }
+
+    shownPhotos.clear();
+    const sortedPhotos = photos.sort((a, b) => a.time - b.time);
+    const sortedCoords = sortedPhotos.map(p => p.coords);
+    // 重新指定排序後的 photos
+    photos = sortedPhotos;
+
     updateGlobalRouteData(sortedCoords);
+
     const bbox = turf.bbox(routeLine);
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 80, duration: 2000 });
+
+    if (noGpsPhotos.length > 0) {
+        console.warn(`${noGpsPhotos.length} 張照片沒有 GPS 資訊，不會被納入軌跡`);
+    }
 });
 
 playBtn.addEventListener('click', () => {
@@ -158,5 +240,21 @@ pauseBtn.addEventListener('click', () => {
     toggleButtons();
     cancelAnimationFrame(animationId);
 });
+
+if (photoCardClose) {
+    photoCardClose.addEventListener('click', () => {
+        hidePhotoCard();
+        if (photoCardTimeout) {
+            clearTimeout(photoCardTimeout);
+            photoCardTimeout = null;
+        }
+        isPlaying = true;
+        toggleButtons();
+        lastTime = 0;
+        animationId = requestAnimationFrame(animate);
+    });
+}
+
+initMap();
 
 initMap();

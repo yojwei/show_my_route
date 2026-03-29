@@ -77,6 +77,14 @@
             </div>
         </div>
 
+        <div id="photo-card" class="hidden absolute right-6 top-32 w-64 z-50 bg-black/80 rounded-xl border border-white/20 shadow-xl overflow-hidden pointer-events-auto">
+            <div class="flex items-center justify-between p-2 bg-black/60">
+                <span id="photo-card-label" class="text-xs text-gray-100">照片</span>
+                <button id="photo-card-close" class="text-gray-300 hover:text-white text-xs">關閉</button>
+            </div>
+            <img id="photo-card-img" src="" alt="照片預覽" class="w-full h-40 object-cover" />
+        </div>
+
         <div class="flex justify-center pb-8 pointer-events-auto">
             <div class="bg-black/60 backdrop-blur-md rounded-full p-2 flex gap-4 border border-white/10 shadow-2xl">
                 <button id="play-btn" class="bg-blue-600 hover:bg-blue-500 text-white rounded-full p-4 transition-transform hover:scale-110">
@@ -103,8 +111,14 @@
         let lastTime = 0;
         let playbackSpeed = 1;
         let photoFeatures = [];
+        let shownPhotos = new Set();
         let noGpsPhotos = [];
         let activePopup = null;
+        let photoCardTimeout = null;
+        const photoCard = document.getElementById('photo-card');
+        const photoCardImg = document.getElementById('photo-card-img');
+        const photoCardLabel = document.getElementById('photo-card-label');
+        const photoCardClose = document.getElementById('photo-card-close');
 
         function escHtml(str) {
             return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -284,6 +298,7 @@
             if (activePopup) { activePopup.remove(); activePopup = null; }
             photoFeatures.forEach(f => URL.revokeObjectURL(f.properties.objectUrl));
             photoFeatures = [];
+            shownPhotos.clear();
             noGpsPhotos = [];
 
             metadata.forEach((m, i) => {
@@ -318,15 +333,17 @@
                 ? `⚠ ${noGpsPhotos.length} 張無 GPS：${noGpsPhotos.map(p => p.name).join('、')}`
                 : '';
 
-            // Sort GPS photos by time (photos without time go last)
-            const sortedPoints = photoFeatures
-                .map(f => ({ coords: f.geometry.coordinates, time: f.properties.time }))
-                .sort((a, b) => {
-                    if (!a.time && !b.time) return 0;
-                    if (!a.time) return 1;
-                    if (!b.time) return -1;
-                    return new Date(a.time) - new Date(b.time);
-                });
+            // Sort GPS photos by time (照片無時間的排最後)
+            photoFeatures.sort((a, b) => {
+                const at = a.properties.time;
+                const bt = b.properties.time;
+                if (!at && !bt) return 0;
+                if (!at) return 1;
+                if (!bt) return -1;
+                return new Date(at) - new Date(bt);
+            });
+
+            const sortedPoints = photoFeatures.map(f => ({ coords: f.geometry.coordinates, time: f.properties.time }));
 
             if (sortedPoints.length >= 2) {
                 updateRoute(sortedPoints.map(p => p.coords));
@@ -398,6 +415,52 @@
             return getFallbackElevation(point);
         }
 
+        function showPhotoCard({ properties }, index) {
+            if (!photoCard || !photoCardImg || !photoCardLabel) return;
+            photoCardImg.src = properties.objectUrl;
+            photoCardLabel.textContent = `照片 #${index + 1} · ${properties.time || '時間不明'}`;
+            photoCard.classList.remove('hidden');
+
+            if (isPlaying) {
+                isPlaying = false;
+                toggleButtons();
+            }
+
+            if (photoCardTimeout) clearTimeout(photoCardTimeout);
+            photoCardTimeout = setTimeout(() => {
+                hidePhotoCard();
+                isPlaying = true;
+                toggleButtons();
+                lastTime = 0;
+                animationId = requestAnimationFrame(animate);
+            }, 3000);
+        }
+
+        function hidePhotoCard() {
+            if (!photoCard) return;
+            photoCard.classList.add('hidden');
+            if (photoCardTimeout) {
+                clearTimeout(photoCardTimeout);
+                photoCardTimeout = null;
+            }
+        }
+
+        function checkAndShowPhoto(currentPoint) {
+            if (!photoFeatures.length || !photoCard || !photoCard.classList.contains('hidden')) return;
+
+            for (let i = 0; i < photoFeatures.length; i++) {
+                if (shownPhotos.has(photoFeatures[i].properties.id)) continue;
+
+                const photoPoint = turf.point(photoFeatures[i].geometry.coordinates);
+                const distanceKm = turf.distance(currentPoint, photoPoint, { units: 'kilometers' });
+                if (distanceKm <= 0.05) {
+                    shownPhotos.add(photoFeatures[i].properties.id);
+                    showPhotoCard(photoFeatures[i], i);
+                    break;
+                }
+            }
+        }
+
         // 動畫循環
         function animate(timestamp) {
             if (!isPlaying) {
@@ -426,7 +489,9 @@
 
                 map.getSource('point').setData(point);
                 distanceDisplay.innerText = currentDistance.toFixed(2);
-                
+
+                checkAndShowPhoto(point);
+
                 const elev = getPointElevation(point);
                 elevationDisplay.innerText = Number.isFinite(elev) ? Math.floor(elev) : "---";
 
@@ -455,6 +520,20 @@
             isPlaying = false;
             toggleButtons();
         });
+
+        if (photoCardClose) {
+            photoCardClose.addEventListener('click', () => {
+                hidePhotoCard();
+                if (photoCardTimeout) {
+                    clearTimeout(photoCardTimeout);
+                    photoCardTimeout = null;
+                }
+                isPlaying = true;
+                toggleButtons();
+                lastTime = 0;
+                animationId = requestAnimationFrame(animate);
+            });
+        }
 
         function toggleButtons() {
             playBtn.classList.toggle('hidden', isPlaying);
