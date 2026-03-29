@@ -168,8 +168,31 @@
                     id: 'route-line',
                     type: 'line',
                     source: 'route',
-                    paint: { 'line-color': '#3b82f6', 'line-width': 5, 'line-opacity': 0.8 }
+                    paint: {
+                        'line-color': '#ffffff',
+                        'line-width': 4,
+                        'line-opacity': 0.8,
+                        'line-dasharray': [2, 2]
+                    }
                 });
+
+                map.addSource('route-progress', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
+                map.addLayer({
+                    id: 'route-progress',
+                    type: 'line',
+                    source: 'route-progress',
+                    paint: {
+                        'line-color': '#3b82f6',
+                        'line-width': 6,
+                        'line-cap': 'round',
+                        'line-join': 'round'
+                    }
+                });
+
+                // 確保進度線在預覽線之上，點之下
+                if (map.getLayer('point-circle')) {
+                    map.moveLayer('route-progress', 'point-circle');
+                }
 
                 map.addSource('point', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [] } } });
                 map.addLayer({
@@ -486,6 +509,24 @@
                 const point = turf.along(routeLine, currentDistance, { units: 'kilometers' });
                 const nextPoint = turf.along(routeLine, Math.min(currentDistance + 0.05, totalDistance), { units: 'kilometers' });
                 const bearing = turf.bearing(point, nextPoint);
+
+                const progressLine = turf.lineSlice(turf.point(routeLine.geometry.coordinates[0]), point, routeLine);
+                const progressSource = map.getSource('route-progress');
+                if (progressSource) {
+                    progressSource.setData(progressLine);
+                    console.debug('[route-progress]', progressLine.geometry.coordinates.length, 'pts', currentDistance.toFixed(3), '/', totalDistance.toFixed(3));
+                } else {
+                    console.warn('[route-progress] source missing');
+                }
+
+                const progressLine = turf.lineSlice(turf.point(routeLine.geometry.coordinates[0]), point, routeLine);
+                const progressSource = map.getSource('route-progress');
+                if (progressSource) {
+                    progressSource.setData(progressLine);
+                    console.debug('[route-progress]', progressLine.geometry.coordinates.length, 'pts', currentDistance.toFixed(3), '/', totalDistance.toFixed(3));
+                } else {
+                    console.warn('[route-progress] source missing');
+                }
 
                 map.getSource('point').setData(point);
                 distanceDisplay.innerText = currentDistance.toFixed(2);

@@ -71,7 +71,7 @@ function initMap() {
 
     map.on('load', () => {
         map.addSource('full-route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
-        map.addLayer({ id: 'route-bg', type: 'line', source: 'full-route', paint: { 'line-color': '#4b5563', 'line-width': 5, 'line-opacity': 0.4 } });
+        map.addLayer({ id: 'route-bg', type: 'line', source: 'full-route', paint: { 'line-color': '#ffffff', 'line-width': 4, 'line-opacity': 0.8, 'line-dasharray': [2, 2] } });
         map.addSource('route-progress', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
         map.addLayer({ id: 'route-fg', type: 'line', source: 'route-progress', paint: { 'line-color': '#3b82f6', 'line-width': 6, 'line-cap': 'round', 'line-join': 'round' } });
         map.addSource('point', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [] } } });
