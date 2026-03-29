@@ -171,8 +171,13 @@
                     type: 'line',
                     source: 'route',
                     paint: {
+<<<<<<< HEAD
                         'line-color': '#ffffff',
                         'line-width': 4,
+=======
+                        'line-color': '#FFFFFF',
+                        'line-width': 2,
+>>>>>>> 5bf067d (feat: 調整路線和點的樣式，改善地圖上路線的可視化效果)
                         'line-opacity': 0.8,
                         'line-dasharray': [2, 2]
                     }
@@ -184,14 +189,27 @@
                     type: 'line',
                     source: 'route-progress',
                     paint: {
+<<<<<<< HEAD
                         'line-color': '#3b82f6',
                         'line-width': 6,
+=======
+                        'line-color': '#0ea5e9',
+                        'line-width': 8,
+                        'line-opacity': 1,
+>>>>>>> 5bf067d (feat: 調整路線和點的樣式，改善地圖上路線的可視化效果)
                         'line-cap': 'round',
                         'line-join': 'round'
                     }
                 });
 
+<<<<<<< HEAD
                 // 確保進度線在預覽線之上，點之下
+=======
+                // 確保進度線在預覽線之上但在點圖層下方
+                if (map.getLayer('route-preview')) {
+                    map.moveLayer('route-progress', 'route-preview');
+                }
+>>>>>>> 5bf067d (feat: 調整路線和點的樣式，改善地圖上路線的可視化效果)
                 if (map.getLayer('point-circle')) {
                     map.moveLayer('route-progress', 'point-circle');
                 }
@@ -247,10 +265,10 @@
                     source: 'photos',
                     filter: ['!', ['has', 'point_count']],
                     paint: {
-                        'circle-radius': 10,
-                        'circle-color': '#fff',
-                        'circle-stroke-width': 3,
-                        'circle-stroke-color': '#3b82f6'
+                        'circle-radius': 9,
+                        'circle-color': ['case', ['==', ['get', 'played'], true], '#1e3a8a', '#bfdbfe'],
+                        'circle-stroke-width': 2,
+                        'circle-stroke-color': ['case', ['==', ['get', 'played'], true], '#0ea5e9', '#60a5fa']
                     }
                 });
 
@@ -338,8 +356,14 @@
                 }
                 photoFeatures.push({
                     type: 'Feature',
-                    geometry: { type: 'Point', coordinates: m.coords },
-                    properties: {
+                    geometry: { type: 'Point', coordinates: m.coords },                    properties: {
+                        id: `photo-${i}`,
+                        name: m.name,
+                        time: m.time,
+                        objectUrl: URL.createObjectURL(m.file),
+                        played: false
+                    }
+                });                    properties: {
                         id: `photo-${i}`,
                         name: m.name,
                         time: m.time,
@@ -493,16 +517,28 @@
             }
         }
 
+        function markPhotoPlayedById(photoId) {
+            const feature = photoFeatures.find(f => f.properties.id === photoId);
+            if (!feature) return;
+            feature.properties.played = true;
+            const photosSource = map.getSource('photos');
+            if (photosSource) {
+                photosSource.setData({ type: 'FeatureCollection', features: photoFeatures });
+            }
+        }
+
         function checkAndShowPhoto(currentPoint) {
             if (!photoFeatures.length || !photoCard || !photoCard.classList.contains('hidden')) return;
 
             for (let i = 0; i < photoFeatures.length; i++) {
-                if (shownPhotos.has(photoFeatures[i].properties.id)) continue;
+                const photoId = photoFeatures[i].properties.id;
+                if (shownPhotos.has(photoId)) continue;
 
                 const photoPoint = turf.point(photoFeatures[i].geometry.coordinates);
                 const distanceKm = turf.distance(currentPoint, photoPoint, { units: 'kilometers' });
                 if (distanceKm <= 0.05) {
-                    shownPhotos.add(photoFeatures[i].properties.id);
+                    shownPhotos.add(photoId);
+                    markPhotoPlayedById(photoId);
                     showPhotoCard(photoFeatures[i], i);
                     break;
                 }
@@ -539,9 +575,15 @@
                 const progressSource = map.getSource('route-progress');
                 if (progressSource) {
                     progressSource.setData(progressLine);
+<<<<<<< HEAD
                     console.debug('[route-progress]', progressLine.geometry.coordinates.length, 'pts', currentDistance.toFixed(3), '/', totalDistance.toFixed(3));
                 } else {
                     console.warn('[route-progress] source missing');
+=======
+                    console.debug('route-progress', { points: progressLine.geometry.coordinates.length, currentDistance });
+                } else {
+                    console.warn('route-progress source NOT found');
+>>>>>>> 5bf067d (feat: 調整路線和點的樣式，改善地圖上路線的可視化效果)
                 }
 
                 map.getSource('point').setData(point);
