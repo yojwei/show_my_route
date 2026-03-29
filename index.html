@@ -202,6 +202,11 @@
                     paint: { 'circle-radius': 8, 'circle-color': '#fff', 'circle-stroke-width': 3, 'circle-stroke-color': '#3b82f6' }
                 });
 
+                // 把進度線保持在點圖層下方，但在預覽線上方
+                if (map.getLayer('route-progress')) {
+                    map.moveLayer('route-progress', 'point-circle');
+                }
+
                 map.addSource('photos', {
                     type: 'geojson',
                     data: { type: 'FeatureCollection', features: [] },
@@ -407,6 +412,8 @@
 
             const routeSource = map.getSource('route');
             if (routeSource) routeSource.setData(routeLine);
+            const progressSource = map.getSource('route-progress');
+            if (progressSource) progressSource.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } });
             const pointSource = map.getSource('point');
             if (pointSource) pointSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [] } });
             const bbox = turf.bbox(routeLine);
@@ -509,15 +516,6 @@
                 const point = turf.along(routeLine, currentDistance, { units: 'kilometers' });
                 const nextPoint = turf.along(routeLine, Math.min(currentDistance + 0.05, totalDistance), { units: 'kilometers' });
                 const bearing = turf.bearing(point, nextPoint);
-
-                const progressLine = turf.lineSlice(turf.point(routeLine.geometry.coordinates[0]), point, routeLine);
-                const progressSource = map.getSource('route-progress');
-                if (progressSource) {
-                    progressSource.setData(progressLine);
-                    console.debug('[route-progress]', progressLine.geometry.coordinates.length, 'pts', currentDistance.toFixed(3), '/', totalDistance.toFixed(3));
-                } else {
-                    console.warn('[route-progress] source missing');
-                }
 
                 const progressLine = turf.lineSlice(turf.point(routeLine.geometry.coordinates[0]), point, routeLine);
                 const progressSource = map.getSource('route-progress');
