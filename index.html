@@ -640,7 +640,7 @@
 
         function getNonOverlappingPhotoPositions(map, points) {
           const placed = [];
-          const size = 50;
+          const size = 300;
           const gap = 8;
           for (const p of points) {
             const proj = map.project([p.lon, p.lat]);
@@ -703,23 +703,42 @@
             ctx.stroke();
           }
 
-          // 右下文字區
+          // --- 右下文字區 (緊湊置右版) ---
           const routeName = (routeTitle.innerText || '命名您的路徑').trim() || '命名您的路徑';
           const dateText = (photoDateRange.min && photoDateRange.max)
             ? `${formatDateSlash(photoDateRange.min)}-${formatDateSlash(photoDateRange.max)}`
             : '日期不明';
-          const padding = 24;
-          ctx.font = 'bold 20px sans-serif';
-          ctx.fillStyle = '#ffffff';
-          ctx.textAlign = 'right';
-          ctx.textBaseline = 'bottom';
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
-          ctx.shadowBlur = 6;
-          const line1 = routeName;
-          const line2 = dateText;
-          ctx.fillText(line2, width - padding, height - padding);
-          ctx.font = 'bold 24px sans-serif';
-          ctx.fillText(line1, width - padding, height - padding - 28);
+
+            // 1. 計算比例數值
+            const padding = width * 0.035;       // 右下邊距
+            const titleSize = height * 0.052;    // 路徑名稱大小
+            const dateSize = height * 0.028;     // 日期大小
+            
+            // 調整行距：將比例從 0.065 縮小至 0.040，使兩行字更加靠近
+            const lineSpacing = height * 0.040;  
+
+            // 2. 設定通用樣式 (確保置右)
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'bottom';
+            ctx.fillStyle = '#ffffff';
+            
+            // 陰影設定
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+            ctx.shadowBlur = height * 0.01;
+            ctx.shadowOffsetX = height * 0.003;
+            ctx.shadowOffsetY = height * 0.003;
+
+            // 3. 繪製日期 (Line 2 - 最下方)
+            ctx.font = `${dateSize}px sans-serif`;
+            ctx.fillText(dateText, width - padding, height - padding);
+
+            // 4. 繪製路徑名稱 (Line 1 - 上方)
+            // 使用加粗字體，並透過減少後的 lineSpacing 讓它靠近 Line 2
+            ctx.font = `bold ${titleSize}px sans-serif`;
+            ctx.fillText(routeName, width - padding, height - padding - lineSpacing);
+
+            // 重置陰影
+            ctx.shadowColor = 'transparent';
 
           // 導出下載
           const dataUrl = shareCanvas.toDataURL('image/png');
