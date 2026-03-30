@@ -1,796 +1,132 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D 路線動畫製作工具</title>
-    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
-    <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
-    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
-    <style>
-        body { margin: 0; padding: 0; overflow: hidden; background: #000; }
-        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-        .backdrop-blur-md { backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
-        /* 讓可編輯標題不顯示外框 */
-        [contenteditable]:focus { outline: none; }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D 路線動畫製作工具</title>
+  <!-- MapLibre GL JS -->
+  <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+  <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
+
+  <!-- Turf.js（用於計算距離、切線等） -->
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+  <!-- Tailwind CSS（樣式框架） -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- EXIF.js（讀取相片 GPS 資訊） -->
+  <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+
+  <style>
+    body { margin: 0; padding: 0; overflow: hidden; background: #000; }
+    #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+    .backdrop-blur-md { backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+    [contenteditable]:focus { outline: none; }
+  </style>
 </head>
 <body class="text-white font-sans">
 
-    <div id="map"></div>
+  <!-- 地圖容器 -->
+  <div id="map"></div>
 
-    <div id="ui-overlay" class="absolute inset-0 z-40 pointer-events-none flex flex-col justify-between p-6">
-        <div class="flex flex-col gap-4 items-start pointer-events-auto w-80">
-            <div class="bg-black/60 backdrop-blur-md rounded-2xl p-5 border border-white/10 shadow-xl w-full">
-                <div class="flex items-center justify-between mb-1 group">
-                    <h1 id="route-title" 
-                        class="text-xl font-bold tracking-wider text-blue-400 cursor-pointer hover:bg-white/5 px-1 rounded transition-all focus:ring-1 focus:ring-blue-500/50" 
-                        contenteditable="true" 
-                        spellcheck="false"
-                        title="點擊修改軌跡名稱">
-                        命名您的路徑
-                    </h1>
-                    <svg class="w-4 h-4 text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
-                    </svg>
-                </div>
-                
-                <p id="route-subtitle" class="text-xs text-gray-400 mb-4">請上傳帶有 GPS 資訊的照片</p>
-                
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <p class="text-[10px] text-gray-500 uppercase font-bold">目前距離</p>
-                        <p class="text-2xl font-mono font-bold"><span id="distance-display">0.0</span> <span class="text-sm font-sans text-gray-400">km</span></p>
-                    </div>
-                    <div>
-                        <p class="text-[10px] text-gray-500 uppercase font-bold">當前海拔</p>
-                        <p class="text-2xl font-mono font-bold"><span id="elevation-display">---</span> <span class="text-sm font-sans text-gray-400">m</span></p>
-                    </div>
-                </div>
-            </div>
+  <!-- UI 浮動層 -->
+  <div id="ui-overlay" class="absolute inset-0 z-40 pointer-events-none flex flex-col justify-between p-6">
 
-            <div class="bg-black/60 backdrop-blur-md rounded-full p-2 border border-white/10 shadow-xl w-full flex items-center justify-between px-3 pointer-events-auto">
-                <label for="photo-upload" class="p-3 hover:bg-white/10 rounded-full transition-all cursor-pointer group" title="新增照片並取代軌跡">
-                    <svg class="w-6 h-6 text-blue-400 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                    </svg>
-                    <input type="file" id="photo-upload" multiple accept="image/*" class="hidden">
-                </label>
+    <!-- 左上資訊區 -->
+    <div class="flex flex-col gap-4 items-start pointer-events-auto w-80">
 
-                <button id="share-btn" class="p-3 hover:bg-white/10 rounded-full transition-all group" title="分享畫面 (截圖)">
-                    <svg class="w-6 h-6 text-gray-300 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316M18 12a3 3 0 100-6 3 3 0 000 6zM6 18a3 3 0 100-6 3 3 0 000 6z"></path>
-                    </svg>
-                </button>
-
-                <button id="view-toggle-btn" class="p-3 hover:bg-white/10 rounded-full transition-all group" title="切換 2D/3D">
-                    <svg class="w-6 h-6 text-gray-300 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path>
-                    </svg>
-                </button>
-
-                <button id="speed-btn" class="px-4 py-2 hover:bg-white/10 rounded-full transition-all text-xs font-mono font-bold text-gray-300 hover:text-white">
-                    1.0x
-                </button>
-            </div>
+      <div class="bg-black/60 backdrop-blur-md rounded-2xl p-5 border border-white/10 shadow-xl w-full">
+        <div class="flex items-center justify-between mb-1 group">
+          <h1 id="route-title"
+              class="text-xl font-bold tracking-wider text-blue-400 cursor-pointer hover:bg-white/5 px-1 rounded transition-all focus:ring-1 focus:ring-blue-500/50"
+              contenteditable="true"
+              spellcheck="false"
+              title="點擊修改軌跡名稱">
+            命名您的路徑
+          </h1>
+          <svg class="w-4 h-4 text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
+          </svg>
         </div>
-
-        <div id="photo-card" class="hidden absolute right-6 top-32 w-64 z-50 bg-black/80 rounded-xl border border-white/20 shadow-xl overflow-hidden pointer-events-auto">
-            <div class="flex items-center justify-between p-2 bg-black/60">
-                <span id="photo-card-label" class="text-xs text-gray-100">照片</span>
-                <button id="photo-card-close" class="text-gray-300 hover:text-white text-xs">關閉</button>
-            </div>
-            <img id="photo-card-img" src="" alt="照片預覽" class="w-full h-40 object-cover" />
+        <p id="route-subtitle" class="text-xs text-gray-400 mb-4">請上傳帶有 GPS 資訊的照片</p>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <p class="text-[10px] text-gray-500 uppercase font-bold">目前距離</p>
+            <p class="text-2xl font-mono font-bold">
+              <span id="distance-display">0.0</span>
+              <span class="text-sm font-sans text-gray-400">km</span>
+            </p>
+          </div>
+          <div>
+            <p class="text-[10px] text-gray-500 uppercase font-bold">當前海拔</p>
+            <p class="text-2xl font-mono font-bold">
+              <span id="elevation-display">---</span>
+              <span class="text-sm font-sans text-gray-400">m</span>
+            </p>
+          </div>
         </div>
+      </div>
 
-        <div class="flex justify-center pb-8 pointer-events-auto">
-            <div class="bg-black/60 backdrop-blur-md rounded-full p-2 flex gap-4 border border-white/10 shadow-2xl">
-                <button id="play-btn" class="bg-blue-600 hover:bg-blue-500 text-white rounded-full p-4 transition-transform hover:scale-110">
-                    <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"></path>
-                    </svg>
-                </button>
-                <button id="pause-btn" class="bg-gray-700 hover:bg-gray-600 text-white rounded-full p-4 hidden transition-transform hover:scale-110">
-                    <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"></path>
-                    </svg>
-                </button>
-            </div>
-        </div>
+      <!-- 動作按鈕區 -->
+      <div class="bg-black/60 backdrop-blur-md rounded-full p-2 border border-white/10 shadow-xl w-full flex items-center justify-between px-3 pointer-events-auto">
+        <label for="photo-upload" class="p-3 hover:bg-white/10 rounded-full transition-all cursor-pointer group" title="新增照片並取代軌跡">
+          <svg class="w-6 h-6 text-blue-400 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+          </svg>
+          <input type="file" id="photo-upload" multiple accept="image/*" class="hidden" />
+        </label>
+
+        <button id="share-btn" class="p-3 hover:bg-white/10 rounded-full transition-all group" title="分享畫面 (截圖)">
+          <svg class="w-6 h-6 text-gray-300 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316M18 12a3 3 0 100-6 3 3 0 000 6zM6 18a3 3 0 100-6 3 3 0 000 6z"></path>
+          </svg>
+        </button>
+
+        <button id="view-toggle-btn" class="p-3 hover:bg-white/10 rounded-full transition-all group" title="切換 2D/3D">
+          <svg class="w-6 h-6 text-gray-300 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path>
+          </svg>
+        </button>
+
+        <button id="speed-btn" class="px-4 py-2 hover:bg-white/10 rounded-full transition-all text-xs font-mono font-bold text-gray-300 hover:text-white">
+          1.0x
+        </button>
+      </div>
     </div>
 
-    <script>
-        let map;
-        let routeLine = null;
-        let totalDistance = 0;
-        let currentDistance = 0;
-        let isPlaying = false;
-        let animationId = null;
-        let lastTime = 0;
-        let playbackSpeed = 1;
-        let photoFeatures = [];
-        let shownPhotos = new Set();
-        let noGpsPhotos = [];
-        let activePopup = null;
-        let photoCardTimeout = null;
-        let photoDateRange = { min: null, max: null };
-        let photoDisplayPoints = [];
-        const photoCard = document.getElementById('photo-card');
-        const photoCardImg = document.getElementById('photo-card-img');
-        const photoCardLabel = document.getElementById('photo-card-label');
-        const photoCardClose = document.getElementById('photo-card-close');
-
-        function escHtml(str) {
-            return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        }
-
-        const distanceDisplay= document.getElementById('distance-display');
-        const elevationDisplay = document.getElementById('elevation-display');
-        const playBtn = document.getElementById('play-btn');
-        const pauseBtn = document.getElementById('pause-btn');
-        const routeTitle = document.getElementById('route-title');
-
-        // 初始化地圖
-        initMap();
-
-        function initMap() {
-            map = new maplibregl.Map({
-                container: 'map',
-                attributionControl: false,
-                style: {
-                    version: 8,
-                    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-                    sources: {
-                        'satellite': {
-                            type: 'raster',
-                            tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-                            tileSize: 256
-                        },
-                        'terrain-source': {
-                            type: 'raster-dem',
-                            tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
-                            encoding: 'terrarium',
-                            tileSize: 256
-                        }
-                    },
-                    layers: [{ id: 'satellite-layer', type: 'raster', source: 'satellite' }],
-                    terrain: { source: 'terrain-source', exaggeration: 1.5 }
-                },
-                center: [121.5, 23.5],
-                zoom: 7,
-                pitch: 45,
-                preserveDrawingBuffer: true // 截圖需要
-            });
-
-            map.on('load', () => {
-                map.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
-                map.addLayer({
-                    id: 'route-preview',
-                    type: 'line',
-                    source: 'route',
-                    paint: {
-<<<<<<< HEAD
-                        'line-color': '#ffffff',
-                        'line-width': 4,
-=======
-                        'line-color': '#FFFFFF',
-                        'line-width': 2,
->>>>>>> 5bf067d (feat: 調整路線和點的樣式，改善地圖上路線的可視化效果)
-                        'line-opacity': 0.8,
-                        'line-dasharray': [2, 2]
-                    }
-                });
-
-                map.addSource('route-progress', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
-                map.addLayer({
-                    id: 'route-progress',
-                    type: 'line',
-                    source: 'route-progress',
-                    paint: {
-<<<<<<< HEAD
-                        'line-color': '#3b82f6',
-                        'line-width': 6,
-=======
-                        'line-color': '#0ea5e9',
-                        'line-width': 8,
-                        'line-opacity': 1,
->>>>>>> 5bf067d (feat: 調整路線和點的樣式，改善地圖上路線的可視化效果)
-                        'line-cap': 'round',
-                        'line-join': 'round'
-                    }
-                });
-
-<<<<<<< HEAD
-                // 確保進度線在預覽線之上，點之下
-=======
-                // 確保進度線在預覽線之上但在點圖層下方
-                if (map.getLayer('route-preview')) {
-                    map.moveLayer('route-progress', 'route-preview');
-                }
->>>>>>> 5bf067d (feat: 調整路線和點的樣式，改善地圖上路線的可視化效果)
-                if (map.getLayer('point-circle')) {
-                    map.moveLayer('route-progress', 'point-circle');
-                }
-
-                map.addSource('point', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [] } } });
-                map.addLayer({
-                    id: 'point-circle',
-                    type: 'circle',
-                    source: 'point',
-                    paint: { 'circle-radius': 8, 'circle-color': '#fff', 'circle-stroke-width': 3, 'circle-stroke-color': '#3b82f6' }
-                });
-
-                // 把進度線保持在點圖層下方，但在預覽線上方
-                if (map.getLayer('route-progress')) {
-                    map.moveLayer('route-progress', 'point-circle');
-                }
-
-                map.addSource('photos', {
-                    type: 'geojson',
-                    data: { type: 'FeatureCollection', features: [] },
-                    cluster: true,
-                    clusterMaxZoom: 14,
-                    clusterRadius: 50
-                });
-                map.addLayer({
-                    id: 'photo-clusters',
-                    type: 'circle',
-                    source: 'photos',
-                    filter: ['has', 'point_count'],
-                    paint: {
-                        'circle-color': ['step', ['get', 'point_count'], '#3b82f6', 10, '#f59e0b', 30, '#ef4444'],
-                        'circle-radius': ['step', ['get', 'point_count'], 20, 10, 30, 30, 40],
-                        'circle-opacity': 0.85,
-                        'circle-stroke-width': 2,
-                        'circle-stroke-color': '#fff'
-                    }
-                });
-                map.addLayer({
-                    id: 'photo-cluster-count',
-                    type: 'symbol',
-                    source: 'photos',
-                    filter: ['has', 'point_count'],
-                    layout: {
-                        'text-field': '{point_count_abbreviated}',
-                        'text-size': 13,
-                        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold']
-                    },
-                    paint: { 'text-color': '#fff' }
-                });
-                map.addLayer({
-                    id: 'photo-markers',
-                    type: 'circle',
-                    source: 'photos',
-                    filter: ['!', ['has', 'point_count']],
-                    paint: {
-                        'circle-radius': 9,
-                        'circle-color': ['case', ['==', ['get', 'played'], true], '#1e3a8a', '#bfdbfe'],
-                        'circle-stroke-width': 2,
-                        'circle-stroke-color': ['case', ['==', ['get', 'played'], true], '#0ea5e9', '#60a5fa']
-                    }
-                });
-
-                const expandCluster = async (e) => {
-                    const features = map.queryRenderedFeatures(e.point, { layers: ['photo-clusters', 'photo-cluster-count'] });
-                    if (!features.length) return;
-                    const clusterId = Number(features[0].properties.cluster_id);
-                    const photosSource = map.getSource('photos');
-                    if (!photosSource || Number.isNaN(clusterId)) return;
-                    try {
-                        const zoom = await photosSource.getClusterExpansionZoom(clusterId);
-                        map.easeTo({ center: features[0].geometry.coordinates, zoom });
-                    } catch (err) { console.warn('Cluster expansion failed:', err); }
-                };
-                map.on('click', 'photo-clusters', expandCluster);
-                map.on('click', 'photo-cluster-count', expandCluster);
-
-                map.on('click', 'photo-markers', (e) => {
-                    const props = e.features[0].properties;
-                    const coords = e.features[0].geometry.coordinates.slice();
-                    if (activePopup) activePopup.remove();
-                    activePopup = new maplibregl.Popup({ maxWidth: '220px' })
-                        .setLngLat(coords)
-                        .setHTML(`
-                            <div style="text-align:center">
-                                <img src="${props.objectUrl}" style="width:200px;height:150px;object-fit:cover;border-radius:6px;margin-bottom:6px">
-                                <div style="font-size:11px;color:#ccc">${escHtml(props.name)}</div>
-                                <div style="font-size:11px;color:#9ca3af">${escHtml(props.time) || '時間不明'}</div>
-                            </div>
-                        `)
-                        .addTo(map);
-                });
-
-                const setPointerCursor = () => map.getCanvas().style.cursor = 'pointer';
-                const clearPointerCursor = () => map.getCanvas().style.cursor = '';
-                map.on('mouseenter', 'photo-clusters', setPointerCursor);
-                map.on('mouseleave', 'photo-clusters', clearPointerCursor);
-                map.on('mouseenter', 'photo-cluster-count', setPointerCursor);
-                map.on('mouseleave', 'photo-cluster-count', clearPointerCursor);
-                map.on('mouseenter', 'photo-markers', setPointerCursor);
-                map.on('mouseleave', 'photo-markers', clearPointerCursor);
-            });
-        }
-
-        // 處理照片上傳
-        document.getElementById('photo-upload').addEventListener('change', async (e) => {
-            const files = Array.from(e.target.files);
-            if (files.length === 0) return;
-
-            const toDec = (dms, ref) => {
-                let dec = dms[0] + dms[1] / 60 + dms[2] / 3600;
-                return (ref === 'S' || ref === 'W') ? dec * -1 : dec;
-            };
-
-            const metadata = await Promise.all(files.map(file => {
-                return new Promise(resolve => {
-                    EXIF.getData(file, function() {
-                        const lat = EXIF.getTag(this, 'GPSLatitude');
-                        const lon = EXIF.getTag(this, 'GPSLongitude');
-                        const latRef = EXIF.getTag(this, 'GPSLatitudeRef') || 'N';
-                        const lonRef = EXIF.getTag(this, 'GPSLongitudeRef') || 'E';
-                        const date = EXIF.getTag(this, 'DateTimeOriginal');
-                        const formattedDate = date ? date.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1/$2/$3') : null;
-                        resolve({
-                            coords: (lat && lon) ? [toDec(lon, lonRef), toDec(lat, latRef)] : null,
-                            time: formattedDate,
-                            file,
-                            name: file.name
-                        });
-                    });
-                });
-            }));
-
-            // Release old object URLs to avoid memory leaks
-            if (activePopup) { activePopup.remove(); activePopup = null; }
-            photoFeatures.forEach(f => URL.revokeObjectURL(f.properties.objectUrl));
-            photoFeatures = [];
-            shownPhotos.clear();
-            noGpsPhotos = [];
-
-            metadata.forEach((m, i) => {
-                if (!m.coords) {
-                    noGpsPhotos.push({ name: m.name, time: m.time });
-                    return;
-                }
-                photoFeatures.push({
-                    type: 'Feature',
-                    geometry: { type: 'Point', coordinates: m.coords },                    properties: {
-                        id: `photo-${i}`,
-                        name: m.name,
-                        time: m.time,
-                        objectUrl: URL.createObjectURL(m.file),
-                        played: false
-                    }
-                });                    properties: {
-                        id: `photo-${i}`,
-                        name: m.name,
-                        time: m.time,
-                        objectUrl: URL.createObjectURL(m.file)
-                    }
-                });
-            });
-
-            // 建立分享用點陣與日期範圍
-            photoDisplayPoints = photoFeatures.map(f => {
-              const timeStr = f.properties.time || null;
-              const dateObj = timeStr ? new Date(timeStr) : null;
-              return { lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], objectUrl: f.properties.objectUrl, time: timeStr, date: isNaN(dateObj) ? null : dateObj };
-            });
-
-            photoDateRange = { min: null, max: null };
-            photoDisplayPoints.forEach(p => {
-              if (!p.date) return;
-              if (!photoDateRange.min || p.date < photoDateRange.min) photoDateRange.min = p.date;
-              if (!photoDateRange.max || p.date > photoDateRange.max) photoDateRange.max = p.date;
-            });
-
-            const photosSource = map.getSource('photos');
-            if (photosSource) photosSource.setData({ type: 'FeatureCollection', features: photoFeatures });
-
-            // Update no-GPS warning
-            let noGpsWarning = document.getElementById('no-gps-warning');
-            if (!noGpsWarning) {
-                noGpsWarning = document.createElement('p');
-                noGpsWarning.id = 'no-gps-warning';
-                noGpsWarning.className = 'text-xs text-yellow-400 mt-2';
-                document.getElementById('route-subtitle').after(noGpsWarning);
-            }
-            noGpsWarning.textContent = noGpsPhotos.length > 0
-                ? `⚠ ${noGpsPhotos.length} 張無 GPS：${noGpsPhotos.map(p => p.name).join('、')}`
-                : '';
-
-            // Sort GPS photos by time (照片無時間的排最後)
-            photoFeatures.sort((a, b) => {
-                const at = a.properties.time;
-                const bt = b.properties.time;
-                if (!at && !bt) return 0;
-                if (!at) return 1;
-                if (!bt) return -1;
-                return new Date(at) - new Date(bt);
-            });
-
-            const sortedPoints = photoFeatures.map(f => ({ coords: f.geometry.coordinates, time: f.properties.time }));
-
-            if (sortedPoints.length >= 2) {
-                updateRoute(sortedPoints.map(p => p.coords));
-            } else {
-                routeLine = null;
-                isPlaying = false;
-                lastTime = 0;
-                currentDistance = 0;
-                totalDistance = 0;
-                toggleButtons();
-                if (animationId) {
-                    cancelAnimationFrame(animationId);
-                    animationId = null;
-                }
-                const routeSource = map.getSource('route');
-                if (routeSource) routeSource.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } });
-                const progressSource = map.getSource('route-progress');
-                if (progressSource) progressSource.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } });
-                const pointSource = map.getSource('point');
-                if (pointSource) pointSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [] } });
-                distanceDisplay.innerText = '0.0';
-                elevationDisplay.innerText = '---';
-                if (sortedPoints.length === 1) {
-                    document.getElementById('route-subtitle').innerText = '包含 1 個點位（需至少 2 個點才能生成路線）';
-                } else {
-                    document.getElementById('route-subtitle').innerText = '照片中無足夠 GPS 資訊以生成路線';
-                }
-            }
-
-            e.target.value = '';
-        });
-
-        function updateRoute(coords) {
-            routeLine = turf.lineString(coords);
-            totalDistance = turf.length(routeLine, { units: 'kilometers' });
-            currentDistance = 0;
-            isPlaying = false;
-            lastTime = 0; // 重置動畫時間戳
-            toggleButtons();
-
-            const routeSource = map.getSource('route');
-            if (routeSource) routeSource.setData(routeLine);
-            const progressSource = map.getSource('route-progress');
-            if (progressSource) progressSource.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } });
-            const pointSource = map.getSource('point');
-            if (pointSource) pointSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [] } });
-            const bbox = turf.bbox(routeLine);
-            map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 80, duration: 2000 });
-
-            document.getElementById('route-subtitle').innerText = `包含 ${coords.length} 個點位`;
-        }
-
-        function getFallbackElevation(point) {
-            const fallbackCandidates = [
-                point?.properties?.ele,
-                point?.properties?.elevation,
-                point?.properties?.altitude,
-                point?.geometry?.coordinates?.[2]
-            ];
-            const fallback = fallbackCandidates.find(value => Number.isFinite(Number(value)));
-            return fallback !== undefined ? Number(fallback) : null;
-        }
-
-        function getPointElevation(point) {
-            const coordinates = point?.geometry?.coordinates;
-            let terrainElevation = null;
-
-            if (typeof map?.queryTerrainElevation === 'function' && Array.isArray(coordinates)) {
-                terrainElevation = map.queryTerrainElevation(coordinates);
-            }
-
-            if (Number.isFinite(terrainElevation)) return terrainElevation;
-            return getFallbackElevation(point);
-        }
-
-        function showPhotoCard({ properties }, index) {
-            if (!photoCard || !photoCardImg || !photoCardLabel) return;
-            photoCardImg.src = properties.objectUrl;
-            photoCardLabel.textContent = `照片 #${index + 1} · ${properties.time || '時間不明'}`;
-            photoCard.classList.remove('hidden');
-
-            if (isPlaying) {
-                isPlaying = false;
-                toggleButtons();
-            }
-
-            if (photoCardTimeout) clearTimeout(photoCardTimeout);
-            photoCardTimeout = setTimeout(() => {
-                hidePhotoCard();
-                isPlaying = true;
-                toggleButtons();
-                lastTime = 0;
-                animationId = requestAnimationFrame(animate);
-            }, 3000);
-        }
-
-        function hidePhotoCard() {
-            if (!photoCard) return;
-            photoCard.classList.add('hidden');
-            if (photoCardTimeout) {
-                clearTimeout(photoCardTimeout);
-                photoCardTimeout = null;
-            }
-        }
-
-        function markPhotoPlayedById(photoId) {
-            const feature = photoFeatures.find(f => f.properties.id === photoId);
-            if (!feature) return;
-            feature.properties.played = true;
-            const photosSource = map.getSource('photos');
-            if (photosSource) {
-                photosSource.setData({ type: 'FeatureCollection', features: photoFeatures });
-            }
-        }
-
-        function checkAndShowPhoto(currentPoint) {
-            if (!photoFeatures.length || !photoCard || !photoCard.classList.contains('hidden')) return;
-
-            for (let i = 0; i < photoFeatures.length; i++) {
-                const photoId = photoFeatures[i].properties.id;
-                if (shownPhotos.has(photoId)) continue;
-
-                const photoPoint = turf.point(photoFeatures[i].geometry.coordinates);
-                const distanceKm = turf.distance(currentPoint, photoPoint, { units: 'kilometers' });
-                if (distanceKm <= 0.05) {
-                    shownPhotos.add(photoId);
-                    markPhotoPlayedById(photoId);
-                    showPhotoCard(photoFeatures[i], i);
-                    break;
-                }
-            }
-        }
-
-        // 動畫循環
-        function animate(timestamp) {
-            if (!isPlaying) {
-                animationId = null;
-                return;
-            }
-
-            if (!lastTime) lastTime = timestamp;
-            const delta = timestamp - lastTime;
-            lastTime = timestamp;
-
-            if (routeLine) {
-                // 每秒跑 1km (基礎速度)，受倍速控制
-                const speed = (1 / 1000) * playbackSpeed; 
-                currentDistance += speed * delta;
-
-                if (currentDistance >= totalDistance) {
-                    currentDistance = totalDistance;
-                    isPlaying = false;
-                    toggleButtons();
-                }
-
-                const point = turf.along(routeLine, currentDistance, { units: 'kilometers' });
-                const nextPoint = turf.along(routeLine, Math.min(currentDistance + 0.05, totalDistance), { units: 'kilometers' });
-                const bearing = turf.bearing(point, nextPoint);
-
-                const progressLine = turf.lineSlice(turf.point(routeLine.geometry.coordinates[0]), point, routeLine);
-                const progressSource = map.getSource('route-progress');
-                if (progressSource) {
-                    progressSource.setData(progressLine);
-<<<<<<< HEAD
-                    console.debug('[route-progress]', progressLine.geometry.coordinates.length, 'pts', currentDistance.toFixed(3), '/', totalDistance.toFixed(3));
-                } else {
-                    console.warn('[route-progress] source missing');
-=======
-                    console.debug('route-progress', { points: progressLine.geometry.coordinates.length, currentDistance });
-                } else {
-                    console.warn('route-progress source NOT found');
->>>>>>> 5bf067d (feat: 調整路線和點的樣式，改善地圖上路線的可視化效果)
-                }
-
-                map.getSource('point').setData(point);
-                distanceDisplay.innerText = currentDistance.toFixed(2);
-
-                checkAndShowPhoto(point);
-
-                const elev = getPointElevation(point);
-                elevationDisplay.innerText = Number.isFinite(elev) ? Math.floor(elev) : "---";
-
-                map.jumpTo({
-                    center: point.geometry.coordinates,
-                    bearing: bearing,
-                    pitch: 65,
-                    zoom: 15
-                });
-            }
-            animationId = requestAnimationFrame(animate);
-        }
-
-        // 播放按鈕
-        playBtn.addEventListener('click', () => {
-            if (!routeLine) return alert("請先上傳照片生成軌跡");
-            if (currentDistance >= totalDistance) currentDistance = 0;
-            
-            isPlaying = true;
-            lastTime = 0; // 關鍵：開始播放時重置 lastTime
-            toggleButtons();
-            if (!animationId) animationId = requestAnimationFrame(animate);
-        });
-
-        pauseBtn.addEventListener('click', () => {
-            isPlaying = false;
-            toggleButtons();
-        });
-
-        if (photoCardClose) {
-            photoCardClose.addEventListener('click', () => {
-                hidePhotoCard();
-                if (photoCardTimeout) {
-                    clearTimeout(photoCardTimeout);
-                    photoCardTimeout = null;
-                }
-                isPlaying = true;
-                toggleButtons();
-                lastTime = 0;
-                animationId = requestAnimationFrame(animate);
-            });
-        }
-
-        function toggleButtons() {
-            playBtn.classList.toggle('hidden', isPlaying);
-            pauseBtn.classList.toggle('hidden', !isPlaying);
-        }
-
-        // 倍速切換
-        document.getElementById('speed-btn').addEventListener('click', function() {
-            const speeds = [1.0, 2.0, 4.0, 8.0];
-            let idx = speeds.indexOf(playbackSpeed);
-            playbackSpeed = speeds[(idx + 1) % speeds.length];
-            this.innerText = playbackSpeed.toFixed(1) + 'x';
-        });
-
-        // 視角切換
-        document.getElementById('view-toggle-btn').addEventListener('click', () => {
-            const currentPitch = map.getPitch();
-            map.easeTo({ pitch: currentPitch > 30 ? 0 : 65, duration: 1000 });
-        });
-
-        // 標題防換行修正
-        routeTitle.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                routeTitle.blur();
-            }
-        });
-
-        // 截圖下載
-        function formatDateSlash(date) {
-          if (!date) return null;
-          const y = date.getFullYear().toString().padStart(4, '0');
-          const m = (date.getMonth() + 1).toString().padStart(2, '0');
-          const d = date.getDate().toString().padStart(2, '0');
-          return `${y}/${m}/${d}`;
-        }
-
-        function drawImageFromUrl(ctx, url, x, y, w, h) {
-          return new Promise((resolve) => {
-            const img = new Image();
-            img.onload = () => {
-              ctx.drawImage(img, x, y, w, h);
-              resolve();
-            };
-            img.onerror = () => resolve(); // 失敗就跳過
-            img.src = url;
-          });
-        }
-
-        function getNonOverlappingPhotoPositions(map, points) {
-          const placed = [];
-          const size = 300;
-          const gap = 8;
-          for (const p of points) {
-            const proj = map.project([p.lon, p.lat]);
-            let x = Math.round(proj.x - size / 2);
-            let y = Math.round(proj.y - size / 2);
-            let attempts = 0;
-            while (attempts < 30) {
-              const collide = placed.some(o => !(x + size + gap < o.x || x > o.x + size + gap || y + size + gap < o.y || y > o.y + size + gap));
-              if (!collide) break;
-              x += 18;
-              y -= 18;
-              attempts++;
-            }
-            if (x < 0) x = 0;
-            if (y < 0) y = 0;
-            const maxX = map.getCanvas().width - size;
-            const maxY = map.getCanvas().height - size;
-            if (x > maxX) x = maxX;
-            if (y > maxY) y = maxY;
-            placed.push({ x, y, objectUrl: p.objectUrl });
-          }
-          return placed;
-        }
-
-        document.getElementById('share-btn').addEventListener('click', async () => {
-          const mapCanvas = map.getCanvas();
-          const width = mapCanvas.width;
-          const height = mapCanvas.height;
-          const shareCanvas = document.createElement('canvas');
-          shareCanvas.width = width;
-          shareCanvas.height = height;
-          const ctx = shareCanvas.getContext('2d');
-
-          // 地圖底圖
-          ctx.drawImage(mapCanvas, 0, 0, width, height);
-
-          // 照片縮圖疊加（互不重疊）
-          const displayPoints = getNonOverlappingPhotoPositions(map, photoDisplayPoints);
-          for (const p of displayPoints) {
-            const sx = p.x;
-            const sy = p.y;
-            const s = 50;
-            ctx.save();
-            ctx.beginPath();
-            ctx.moveTo(sx + 8, sy);
-            ctx.lineTo(sx + s - 8, sy);
-            ctx.quadraticCurveTo(sx + s, sy, sx + s, sy + 8);
-            ctx.lineTo(sx + s, sy + s - 8);
-            ctx.quadraticCurveTo(sx + s, sy + s, sx + s - 8, sy + s);
-            ctx.lineTo(sx + 8, sy + s);
-            ctx.quadraticCurveTo(sx, sy + s, sx, sy + s - 8);
-            ctx.lineTo(sx, sy + 8);
-            ctx.quadraticCurveTo(sx, sy, sx + 8, sy);
-            ctx.closePath();
-            ctx.clip();
-            await drawImageFromUrl(ctx, p.objectUrl, sx, sy, s, s);
-            ctx.restore();
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-          }
-
-          // --- 右下文字區 (緊湊置右版) ---
-          const routeName = (routeTitle.innerText || '命名您的路徑').trim() || '命名您的路徑';
-          const dateText = (photoDateRange.min && photoDateRange.max)
-            ? `${formatDateSlash(photoDateRange.min)}-${formatDateSlash(photoDateRange.max)}`
-            : '日期不明';
-
-            // 1. 計算比例數值
-            const padding = width * 0.035;       // 右下邊距
-            const titleSize = height * 0.052;    // 路徑名稱大小
-            const dateSize = height * 0.028;     // 日期大小
-            
-            // 調整行距：將比例從 0.065 縮小至 0.040，使兩行字更加靠近
-            const lineSpacing = height * 0.040;  
-
-            // 2. 設定通用樣式 (確保置右)
-            ctx.textAlign = 'right';
-            ctx.textBaseline = 'bottom';
-            ctx.fillStyle = '#ffffff';
-            
-            // 陰影設定
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
-            ctx.shadowBlur = height * 0.01;
-            ctx.shadowOffsetX = height * 0.003;
-            ctx.shadowOffsetY = height * 0.003;
-
-            // 3. 繪製日期 (Line 2 - 最下方)
-            ctx.font = `${dateSize}px sans-serif`;
-            ctx.fillText(dateText, width - padding, height - padding);
-
-            // 4. 繪製路徑名稱 (Line 1 - 上方)
-            // 使用加粗字體，並透過減少後的 lineSpacing 讓它靠近 Line 2
-            ctx.font = `bold ${titleSize}px sans-serif`;
-            ctx.fillText(routeName, width - padding, height - padding - lineSpacing);
-
-            // 重置陰影
-            ctx.shadowColor = 'transparent';
-
-          // 導出下載
-          const dataUrl = shareCanvas.toDataURL('image/png');
-          const link = document.createElement('a');
-          link.download = 'hiking-3d-route.png';
-          link.href = dataUrl;
-          link.click();
-        });
-    </script>
+    <!-- 右上照片卡 -->
+    <div id="photo-card" class="hidden absolute right-6 top-32 w-64 z-50 bg-black/80 rounded-xl border border-white/20 shadow-xl overflow-hidden pointer-events-auto">
+      <div class="flex items-center justify-between p-2 bg-black/60">
+        <span id="photo-card-label" class="text-xs text-gray-100">照片</span>
+        <button id="photo-card-close" class="text-gray-300 hover:text-white text-xs">關閉</button>
+      </div>
+      <img id="photo-card-img" src="" alt="照片預覽" class="w-full h-40 object-cover" />
+    </div>
+
+    <!-- 下方播放按鈕 -->
+    <div class="flex justify-center pb-8 pointer-events-auto">
+      <div class="bg-black/60 backdrop-blur-md rounded-full p-2 flex gap-4 border border-white/10 shadow-2xl">
+        <button id="play-btn" class="bg-blue-600 hover:bg-blue-500 text-white rounded-full p-4 transition-transform hover:scale-110">
+          <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
+                  clip-rule="evenodd"></path>
+          </svg>
+        </button>
+        <button id="pause-btn" class="bg-gray-700 hover:bg-gray-600 text-white rounded-full p-4 hidden transition-transform hover:scale-110">
+          <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd"
+                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z"
+                  clip-rule="evenodd"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 外部 JS 檔 -->
+  <script src="app.js"></script>
 </body>
 </html>
