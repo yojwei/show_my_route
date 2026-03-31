@@ -11,14 +11,35 @@ let shownPhotos = new Set();
 let finalPopups = []; 
 let photoCardTimeout = null;
 
-// --- 速度與視角配置 ---
-const speedConfigs = [
-    { duration: 30, icon: 'footprints', label: '慢速巡航', zoom: 16, pitch: 60 }, 
-    { duration: 15, icon: 'car',         label: '標準快進', zoom: 12, pitch: 45 }, 
-    { duration: 5,  icon: 'bird',        label: '極速鳥瞰', zoom: 6,  pitch: 30 }
-];
-let currentSpeedIndex = 0;
+// --- 新增：分段導覽配置函數 ---
+function getSegmentConfig(dist) {
+    if (!routeLine || photoFeatures.length < 2) return { speed: 200, zoom: 15, pitch: 60 };
 
+    let currentIndex = 0;
+    for (let i = 0; i < photoFeatures.length; i++) {
+        const photoDist = turf.length(turf.lineSlice(turf.point(routeLine.coordinates[0]), photoFeatures[i], routeLine), { units: 'kilometers' });
+        if (photoDist <= dist) currentIndex = i;
+        else break;
+    }
+
+    const p1 = photoFeatures[currentIndex];
+    const p2 = photoFeatures[currentIndex + 1];
+    if (!p2) return { speed: 150, zoom: 15, pitch: 60 }; 
+
+    const segmentDist = turf.distance(p1, p2, { units: 'kilometers' });
+
+    // --- 調整後的 A-B-C-D 節奏 ---
+    if (segmentDist > 5) {      
+        // 長距離：時速提到 600-800km/h 才有「飛越」感
+        return { speed: 600, zoom: 12, pitch: 45 }; 
+    } else if (segmentDist < 1) { 
+        // 短距離：時速 80km/h (市區開車感)，Zoom In 到 17.5 看到街道
+        return { speed: 80, zoom: 17.5, pitch: 65 }; 
+    } else {                    
+        // 中距離：時速 250km/h
+        return { speed: 250, zoom: 15, pitch: 55 }; 
+    }
+}
 // --- DOM 元件 ---
 const uploadInput = document.getElementById('photo-upload');
 const photoCard = document.getElementById('photo-card');
@@ -28,7 +49,6 @@ const distanceDisplay = document.getElementById('distance-display');
 const elevationDisplay = document.getElementById('elevation-display');
 const playBtn = document.getElementById('play-btn');
 const pauseBtn = document.getElementById('pause-btn');
-const speedBtn = document.getElementById('speed-btn');
 const shareBtn = document.getElementById('share-btn');
 const routeTitle = document.getElementById('route-title');
 const iconContainer = document.getElementById('speed-icon-container');
@@ -214,14 +234,16 @@ function updateDisplay(dist) {
         }
     });
 
-    const config = speedConfigs[currentSpeedIndex];
-    const leftPad = window.innerWidth < 800 ? 0 : 300;
+    const segConfig = getSegmentConfig(dist);
+    const leftPad = window.innerWidth < 800 ? 0 : 250;
+
     map.easeTo({ 
         center: coords, 
-        zoom: currentSpeedIndex === 0 ? 18 : config.zoom, 
-        pitch: config.pitch, 
+        zoom: segConfig.zoom,    // 根據 A-B-C-D 路段自動變化的縮放
+        pitch: segConfig.pitch,  // 自動變化的傾斜度
         padding: { left: leftPad }, 
-        duration: 100 
+        duration: 300,           // 增加緩動時間，讓 Zoom 切換時變平滑
+        essential: true
     });
 }
 
@@ -324,9 +346,9 @@ function animate(timestamp) {
     const delta = timestamp - lastTime;
     lastTime = timestamp;
 
-    const targetDuration = speedConfigs[currentSpeedIndex].duration;
-    const distancePerMs = totalDistance / (targetDuration * 1000);
-    currentDistance += distancePerMs * delta;
+    const config = getSegmentConfig(currentDistance); // 取得當前路段配置
+    const kmPerMs = config.speed / 3600000;           // 將時速轉為毫秒位移
+    currentDistance += kmPerMs * delta;
 
     if (currentDistance >= totalDistance) {
         currentDistance = totalDistance;
@@ -357,13 +379,6 @@ pauseBtn.addEventListener('click', () => {
     isPlaying = false;
     toggleButtons();
     cancelAnimationFrame(animationId);
-});
-
-speedBtn.addEventListener('click', () => {
-    currentSpeedIndex = (currentSpeedIndex + 1) % speedConfigs.length;
-    const config = speedConfigs[currentSpeedIndex];
-    iconContainer.innerHTML = `<i data-lucide="${config.icon}" class="w-5 h-5"></i>`;
-    if (typeof lucide !== 'undefined') lucide.createIcons();
 });
 
 function toggleButtons() {
