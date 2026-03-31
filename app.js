@@ -220,11 +220,18 @@ if (uploadInput) {
             const lon = EXIF.getTag(this, 'GPSLongitude');
             const latRef = EXIF.getTag(this, 'GPSLatitudeRef') || 'N';
             const lonRef = EXIF.getTag(this, 'GPSLongitudeRef') || 'E';
+            
+            // --- [新增] 海拔與海拔基準讀取 ---
+            const alt = EXIF.getTag(this, 'GPSAltitude');
+            const altRef = EXIF.getTag(this, 'GPSAltitudeRef') || 0; // 0=高於海平面, 1=低於海平面
+            const realAlt = alt ? (altRef === 1 ? -alt : alt) : 0;
+            
             const date = EXIF.getTag(this, 'DateTimeOriginal');
             const formattedDate = date ? date.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1/$2/$3') : null;
 
             resolve({
               coords: (lat && lon) ? [toDec(lon, lonRef), toDec(lat, latRef)] : null,
+              altitude: realAlt, // 存入 metadata
               time: formattedDate,
               file,
               name: file.name
@@ -256,9 +263,10 @@ if (uploadInput) {
         type: 'Feature',
         geometry: { type: 'Point', coordinates: m.coords },
         properties: {
-          id: `photo-${i}`,
+          id: `photo-${i}-${Date.now()}`,
           name: m.name,
           time: m.time,
+          altitude: m.altitude, // 存入 Feature 屬性
           objectUrl: objectUrl
         }
       });
@@ -324,12 +332,11 @@ function updateRoute(coords) {
 
   const bbox = turf.bbox(routeLine);
 
-  // 1. 初始路徑預覽避開左側卡片
   map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
     padding: { 
       top: 80, 
       bottom: 80, 
-      left: 420,  // 左側預留空間
+      left: 420,  
       right: 80 
     },
     duration: 2000,
@@ -370,7 +377,7 @@ function showFinalSummary() {
             closeButton: false, 
             closeOnClick: false,
             maxWidth: '120px',
-            offset: [0, -10], // 稍微上移避免蓋住線條
+            offset: [0, -10],
             className: 'final-summary-popup'
         })
             .setLngLat(offsetCoords)
@@ -383,7 +390,6 @@ function showFinalSummary() {
         finalPopups.push(popup);
     });
 
-    // 2. 最終畫面避開左側卡片
     const bbox = turf.bbox(routeLine);
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
         padding: { top: 100, bottom: 100, left: 200, right: 100 }, 
@@ -402,8 +408,19 @@ function updateDisplay(dist) {
   map?.getSource('point')?.setData(point);
   distanceDisplay.innerText = dist.toFixed(2);
 
-  const elev = map.queryTerrainElevation ? map.queryTerrainElevation(point.geometry.coordinates) : null;
-  elevationDisplay.innerText = Number.isFinite(elev) ? Math.floor(elev) : '---';
+  // --- [修正] 改為顯示 EXIF 紀錄的海拔 ---
+  // 找出目前路徑進度下，距離最近的照片海拔數據
+  let currentAlt = 0;
+  let minDiff = Infinity;
+  
+  photoFeatures.forEach(f => {
+    const d = turf.distance(point, f, { units: 'kilometers' });
+    if (d < minDiff) {
+      minDiff = d;
+      currentAlt = f.properties.altitude;
+    }
+  });
+  elevationDisplay.innerText = Math.floor(currentAlt);
 
   photoFeatures.forEach((f, i) => {
     if (!shownPhotos.has(f.properties.id)) {
@@ -415,10 +432,9 @@ function updateDisplay(dist) {
     }
   });
 
-  // 3. 動畫跟隨時避開左側卡片
   map.easeTo({
     center: point.geometry.coordinates,
-    padding: { left: 350, right: 0, top: 0, bottom: 0 }, // 視角中心向右偏移
+    padding: { left: 350, right: 0, top: 0, bottom: 0 },
     zoom: 15.5,
     pitch: 65,
     duration: 100
@@ -449,7 +465,6 @@ function animate(timestamp) {
   animationId = requestAnimationFrame(animate);
 }
 
-// 按鈕事件
 playBtn.addEventListener('click', () => {
   if (!routeLine) return alert('請先上傳照片');
   
@@ -477,7 +492,7 @@ function toggleButtons() {
   pauseBtn.classList.toggle('hidden', !isPlaying);
 }
 
-// 截圖下載邏輯
+// 截圖下載邏輯 (省略...保持與原程式碼一致)
 function formatDateSlash(date) {
     if (!date) return "";
     const y = date.getFullYear();
