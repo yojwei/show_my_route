@@ -73,12 +73,7 @@ function initMap() {
       id: 'route-preview',
       type: 'line',
       source: 'route',
-      paint: {
-        'line-color': '#ffffff',
-        'line-width': 2,
-        'line-opacity': 0.8,
-        'line-dasharray': [2, 2]
-      }
+      paint: { 'line-color': '#ffffff', 'line-width': 2, 'line-opacity': 0.8, 'line-dasharray': [2, 2] }
     });
 
     map.addSource('route-progress', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
@@ -86,13 +81,7 @@ function initMap() {
       id: 'route-progress',
       type: 'line',
       source: 'route-progress',
-      paint: {
-        'line-color': '#3b82f6',
-        'line-width': 6,
-        'line-opacity': 1,
-        'line-cap': 'round',
-        'line-join': 'round'
-      }
+      paint: { 'line-color': '#3b82f6', 'line-width': 6, 'line-opacity': 1, 'line-cap': 'round', 'line-join': 'round' }
     });
 
     map.addSource('point', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [] } } });
@@ -100,20 +89,13 @@ function initMap() {
       id: 'point-circle',
       type: 'circle',
       source: 'point',
-      paint: {
-        'circle-radius': 8,
-        'circle-color': '#fff',
-        'circle-stroke-width': 3,
-        'circle-stroke-color': '#3b82f6'
-      }
+      paint: { 'circle-radius': 8, 'circle-color': '#fff', 'circle-stroke-width': 3, 'circle-stroke-color': '#3b82f6' }
     });
 
     map.addSource('photos', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
-      cluster: true,
-      clusterMaxZoom: 14,
-      clusterRadius: 50
+      cluster: true, clusterMaxZoom: 14, clusterRadius: 50
     });
 
     map.addLayer({
@@ -148,54 +130,18 @@ function initMap() {
       type: 'circle',
       source: 'photos',
       filter: ['!', ['has', 'point_count']],
-      paint: {
-        'circle-radius': 9,
-        'circle-color': '#bfdbfe',
-        'circle-stroke-width': 2,
-        'circle-stroke-color': '#60a5fa'
-      }
+      paint: { 'circle-radius': 9, 'circle-color': '#bfdbfe', 'circle-stroke-width': 2, 'circle-stroke-color': '#60a5fa' }
     });
 
+    // 叢集點擊事件
     const expandCluster = async (e) => {
-      const features = map.queryRenderedFeatures(e.point, { layers: ['photo-clusters', 'photo-cluster-count'] });
+      const features = map.queryRenderedFeatures(e.point, { layers: ['photo-clusters'] });
       if (!features.length) return;
-      const clusterId = Number(features[0].properties.cluster_id);
-      const photosSource = map.getSource('photos');
-      if (!photosSource || Number.isNaN(clusterId)) return;
-      try {
-        const zoom = await photosSource.getClusterExpansionZoom(clusterId);
-        map.easeTo({ center: features[0].geometry.coordinates, zoom });
-      } catch (err) {
-        console.warn('Cluster expansion failed:', err);
-      }
+      const clusterId = features[0].properties.cluster_id;
+      const zoom = await map.getSource('photos').getClusterExpansionZoom(clusterId);
+      map.easeTo({ center: features[0].geometry.coordinates, zoom });
     };
     map.on('click', 'photo-clusters', expandCluster);
-    map.on('click', 'photo-cluster-count', expandCluster);
-
-    map.on('click', 'photo-markers', (e) => {
-      const props = e.features[0].properties;
-      const coords = e.features[0].geometry.coordinates.slice();
-      if (activePopup) activePopup.remove();
-      activePopup = new maplibregl.Popup({ maxWidth: '220px' })
-        .setLngLat(coords)
-        .setHTML(`
-          <div style="text-align:center">
-            <img src="${props.objectUrl}" style="width:200px;height:150px;object-fit:cover;border-radius:6px;margin-bottom:6px">
-            <div style="font-size:11px;color:#ccc">${escHtml(props.name)}</div>
-            <div style="font-size:11px;color:#9ca3af">${escHtml(props.time) || '時間不明'}</div>
-          </div>
-        `)
-        .addTo(map);
-    });
-
-    const setPointer = () => map.getCanvas().style.cursor = 'pointer';
-    const clearPointer = () => map.getCanvas().style.cursor = '';
-    map.on('mouseenter', 'photo-clusters', setPointer);
-    map.on('mouseleave', 'photo-clusters', clearPointer);
-    map.on('mouseenter', 'photo-cluster-count', setPointer);
-    map.on('mouseleave', 'photo-cluster-count', clearPointer);
-    map.on('mouseenter', 'photo-markers', setPointer);
-    map.on('mouseleave', 'photo-markers', clearPointer);
   });
 }
 
@@ -220,18 +166,14 @@ if (uploadInput) {
             const lon = EXIF.getTag(this, 'GPSLongitude');
             const latRef = EXIF.getTag(this, 'GPSLatitudeRef') || 'N';
             const lonRef = EXIF.getTag(this, 'GPSLongitudeRef') || 'E';
-            
-            // --- [新增] 海拔與海拔基準讀取 ---
             const alt = EXIF.getTag(this, 'GPSAltitude');
-            const altRef = EXIF.getTag(this, 'GPSAltitudeRef') || 0; // 0=高於海平面, 1=低於海平面
-            const realAlt = alt ? (altRef === 1 ? -alt : alt) : 0;
-            
+            const altitudeValue = alt ? (alt.numerator / alt.denominator || parseFloat(alt)) : 0;
             const date = EXIF.getTag(this, 'DateTimeOriginal');
             const formattedDate = date ? date.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1/$2/$3') : null;
 
             resolve({
               coords: (lat && lon) ? [toDec(lon, lonRef), toDec(lat, latRef)] : null,
-              altitude: realAlt, // 存入 metadata
+              altitude: altitudeValue,
               time: formattedDate,
               file,
               name: file.name
@@ -241,17 +183,13 @@ if (uploadInput) {
       })
     );
 
+    // 重置狀態
     if (activePopup) activePopup.remove();
     finalPopups.forEach(p => p.remove());
     finalPopups = [];
-
     photoFeatures.forEach(f => URL.revokeObjectURL(f.properties.objectUrl));
-    photoDisplayPoints.forEach(p => p.objectUrl && URL.revokeObjectURL(p.objectUrl));
-
     photoFeatures = [];
-    photoDisplayPoints = [];
     shownPhotos.clear();
-    noGpsPhotos = [];
 
     metadata.forEach((m, i) => {
       if (!m.coords) {
@@ -266,52 +204,23 @@ if (uploadInput) {
           id: `photo-${i}-${Date.now()}`,
           name: m.name,
           time: m.time,
-          altitude: m.altitude, // 存入 Feature 屬性
+          altitude: m.altitude,
           objectUrl: objectUrl
         }
       });
     });
 
-    photoDisplayPoints = photoFeatures.map(f => {
-      const timeStr = f.properties.time || null;
-      const dateObj = timeStr ? new Date(timeStr) : null;
-      return {
-        lon: f.geometry.coordinates[0],
-        lat: f.geometry.coordinates[1],
-        objectUrl: f.properties.objectUrl,
-        time: timeStr,
-        date: isNaN(dateObj) ? null : dateObj
-      };
-    });
-
-    photoDateRange = { min: null, max: null };
-    photoDisplayPoints.forEach(p => {
-      if (!p.date) return;
-      if (!photoDateRange.min || p.date < photoDateRange.min) photoDateRange.min = p.date;
-      if (!photoDateRange.max || p.date > photoDateRange.max) photoDateRange.max = p.date;
-    });
+    // 依時間排序
+    photoFeatures.sort((a, b) => new Date(a.properties.time) - new Date(b.properties.time));
 
     const photosSource = map?.getSource('photos');
-    if (photosSource) {
-      photosSource.setData({ type: 'FeatureCollection', features: photoFeatures });
-    }
+    if (photosSource) photosSource.setData({ type: 'FeatureCollection', features: photoFeatures });
 
-    let noGpsWarning = document.getElementById('no-gps-warning');
-    if (!noGpsWarning) {
-      noGpsWarning = document.createElement('p');
-      noGpsWarning.id = 'no-gps-warning';
-      noGpsWarning.className = 'text-xs text-yellow-400 mt-2';
-      document.getElementById('route-subtitle').after(noGpsWarning);
-    }
-    noGpsWarning.textContent = noGpsPhotos.length > 0 ? `⚠ ${noGpsPhotos.length} 張無 GPS` : '';
-
-    const gpsPhotos = photoFeatures.filter(f => f.properties.time);
-    const noTimePhotos = photoFeatures.filter(f => !f.properties.time);
-    gpsPhotos.sort((a, b) => new Date(a.properties.time) - new Date(b.properties.time));
-    photoFeatures = [...gpsPhotos, ...noTimePhotos];
-
+    // 更新路徑 (串接 OSRM)
     const coords = photoFeatures.map(f => f.geometry.coordinates);
-    if (coords.length >= 2) updateRoute(coords);
+    if (coords.length >= 2) {
+      await updateRoute(coords);
+    }
     
     e.target.value = '';
   });
@@ -319,109 +228,55 @@ if (uploadInput) {
 
 // --- 3. 路徑與動畫邏輯 ---
 
-function updateRoute(coords) {
-  routeLine = turf.lineString(coords);
-  totalDistance = turf.length(routeLine, { units: 'kilometers' });
-  currentDistance = 0;
-  isPlaying = false;
-  toggleButtons();
+async function updateRoute(coords) {
+  const pointsStr = coords.map(c => `${c[0]},${c[1]}`).join(';');
+  const url = `https://router.project-osrm.org/route/v1/driving/${pointsStr}?overview=full&geometries=geojson`;
 
-  map?.getSource('route')?.setData(routeLine);
-  map?.getSource('route-progress')?.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } });
-  map?.getSource('point')?.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: coords[0] } });
+  try {
+    const response = await fetch(url);
+    const data = await response.json();
+    if (data.code !== 'Ok') throw new Error('OSRM Error');
 
-  const bbox = turf.bbox(routeLine);
+    routeLine = data.routes[0].geometry;
+    totalDistance = turf.length(routeLine, { units: 'kilometers' });
+    currentDistance = 0;
+    isPlaying = false;
+    toggleButtons();
 
-  map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
-    padding: { 
-      top: 80, 
-      bottom: 80, 
-      left: 420,  
-      right: 80 
-    },
-    duration: 2000,
-    essential: true
-  });
-
-  document.getElementById('route-subtitle').innerText = `包含 ${coords.length} 個點位`;
-}
-
-function showPhotoCard(feature, index) {
-  if (!photoCard) return;
-  photoCardImg.src = feature.properties.objectUrl;
-  photoCardLabel.textContent = `照片 #${index + 1} · ${feature.properties.time || '時間不明'}`;
-  photoCard.classList.remove('hidden');
-
-  if (photoCardTimeout) clearTimeout(photoCardTimeout);
-  photoCardTimeout = setTimeout(() => {
-    photoCard.classList.add('hidden');
-  }, 3500);
-}
-
-function getOffsetPhotoPosition(map, lonLat) {
-    const pixel = map.project(lonLat);
-    const offsetPixel = { x: pixel.x + 45, y: pixel.y - 45 };
-    return map.unproject(offsetPixel);
-}
-
-function showFinalSummary() {
-    if (photoFeatures.length === 0) return;
-
-    finalPopups.forEach(p => p.remove());
-    finalPopups = [];
-
-    photoFeatures.forEach((f) => {
-        const offsetCoords = getOffsetPhotoPosition(map, f.geometry.coordinates);
-        
-        const popup = new maplibregl.Popup({ 
-            closeButton: false, 
-            closeOnClick: false,
-            maxWidth: '120px',
-            offset: [0, -10],
-            className: 'final-summary-popup'
-        })
-            .setLngLat(offsetCoords)
-            .setHTML(`
-                <div style="border: 2px solid white; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
-                    <img src="${f.properties.objectUrl}" style="width: 100%; display: block; object-fit: cover; height: 80px;">
-                </div>
-            `)
-            .addTo(map);
-        finalPopups.push(popup);
-    });
+    map?.getSource('route')?.setData(routeLine);
+    map?.getSource('route-progress')?.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } });
+    map?.getSource('point')?.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: routeLine.coordinates[0] } });
 
     const bbox = turf.bbox(routeLine);
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
-        padding: { top: 100, bottom: 100, left: 200, right: 100 }, 
-        duration: 2500,
-        pitch: 0,
-        bearing: 0,
-        essential: true
+      padding: { top: 80, bottom: 80, left: 420, right: 80 },
+      duration: 2000
     });
+    document.getElementById('route-subtitle').innerText = `包含 ${coords.length} 個地標 (已規劃道路)`;
+  } catch (err) {
+    console.error("Using Fallback Line:", err);
+    routeLine = turf.lineString(coords);
+    totalDistance = turf.length(routeLine, { units: 'kilometers' });
+    map?.getSource('route')?.setData(routeLine);
+  }
 }
 
 function updateDisplay(dist) {
   const point = turf.along(routeLine, dist, { units: 'kilometers' });
-  const progressLine = turf.lineSlice(turf.point(routeLine.geometry.coordinates[0]), point, routeLine);
+  const coords = point.geometry.coordinates;
 
+  const progressLine = turf.lineSlice(turf.point(routeLine.coordinates[0]), point, routeLine);
   map?.getSource('route-progress')?.setData(progressLine);
   map?.getSource('point')?.setData(point);
   distanceDisplay.innerText = dist.toFixed(2);
 
-  // --- [修正] 改為顯示 EXIF 紀錄的海拔 ---
-  // 找出目前路徑進度下，距離最近的照片海拔數據
-  let currentAlt = 0;
-  let minDiff = Infinity;
-  
-  photoFeatures.forEach(f => {
-    const d = turf.distance(point, f, { units: 'kilometers' });
-    if (d < minDiff) {
-      minDiff = d;
-      currentAlt = f.properties.altitude;
-    }
-  });
-  elevationDisplay.innerText = Math.floor(currentAlt);
+  // 海拔修正：從地圖地形獲取
+  const terrainAlt = map.queryTerrainElevation(coords);
+  if (elevationDisplay) {
+    elevationDisplay.innerText = (terrainAlt !== null) ? Math.floor(terrainAlt) : '0';
+  }
 
+  // 觸發照片卡片
   photoFeatures.forEach((f, i) => {
     if (!shownPhotos.has(f.properties.id)) {
       const d = turf.distance(point, f, { units: 'kilometers' });
@@ -433,11 +288,132 @@ function updateDisplay(dist) {
   });
 
   map.easeTo({
-    center: point.geometry.coordinates,
+    center: coords,
     padding: { left: 350, right: 0, top: 0, bottom: 0 },
-    zoom: 15.5,
-    pitch: 65,
-    duration: 100
+    zoom: 15.5, pitch: 65, duration: 100
+  });
+}
+
+function showPhotoCard(feature, index) {
+  photoCardImg.src = feature.properties.objectUrl;
+  photoCardLabel.textContent = `照片 #${index + 1} · ${feature.properties.time || '時間不明'}`;
+  photoCard.classList.remove('hidden');
+  if (photoCardTimeout) clearTimeout(photoCardTimeout);
+  photoCardTimeout = setTimeout(() => photoCard.classList.add('hidden'), 3500);
+}
+
+function animate(timestamp) {
+  if (!isPlaying) return;
+  if (!lastTime) lastTime = timestamp;
+  const delta = timestamp - lastTime;
+  lastTime = timestamp;
+
+  const speed = (1 / 1000) * playbackSpeed;
+  currentDistance += speed * delta;
+
+  if (currentDistance >= totalDistance) {
+    currentDistance = totalDistance;
+    isPlaying = false;
+    toggleButtons();
+    updateDisplay(currentDistance);
+    setTimeout(showFinalSummary, 800);
+    return;
+  }
+
+  updateDisplay(currentDistance);
+  animationId = requestAnimationFrame(animate);
+}
+
+playBtn.addEventListener('click', () => {
+  if (!routeLine) return alert('請先上傳照片');
+  if (currentDistance >= totalDistance) {
+    currentDistance = 0;
+    shownPhotos.clear();
+  }
+  isPlaying = true;
+  lastTime = 0;
+  toggleButtons();
+  animate(performance.now());
+});
+
+pauseBtn.addEventListener('click', () => {
+  isPlaying = false;
+  toggleButtons();
+});
+
+function toggleButtons() {
+  playBtn.classList.toggle('hidden', isPlaying);
+  pauseBtn.classList.toggle('hidden', !isPlaying);
+}
+
+function showFinalSummary() {
+  if (photoFeatures.length === 0) return;
+  finalPopups.forEach(p => p.remove());
+  finalPopups = [];
+
+  photoFeatures.forEach((f) => {
+    const offsetCoords = getOffsetPhotoPosition(map, f.geometry.coordinates);
+    const popup = new maplibregl.Popup({ 
+      closeButton: false, closeOnClick: false, maxWidth: '120px', offset: [0, -10], className: 'final-summary-popup'
+    })
+      .setLngLat(offsetCoords)
+      .setHTML(`<div style="border: 2px solid white; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
+                  <img src="${f.properties.objectUrl}" style="width: 100%; display: block; object-fit: cover; height: 80px;">
+                </div>`)
+      .addTo(map);
+    finalPopups.push(popup);
+  });
+
+  const bbox = turf.bbox(routeLine);
+  map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
+    padding: { top: 100, bottom: 100, left: 200, right: 100 }, 
+    duration: 2500, pitch: 0, bearing: 0, essential: true
+  });
+}
+
+// [關鍵修改] 讓海拔隨地形即時跳動
+function updateDisplay(dist) {
+  const point = turf.along(routeLine, dist, { units: 'kilometers' });
+  const coords = point.geometry.coordinates;
+
+  // 更新路徑與小藍點位置
+  const progressLine = turf.lineSlice(turf.point(routeLine.coordinates[0]), point, routeLine);
+  map?.getSource('route-progress')?.setData(progressLine);
+  map?.getSource('point')?.setData(point);
+  distanceDisplay.innerText = dist.toFixed(2);
+
+  // --- 海拔顯示修正：改用 MapLibre Terrain 數據 ---
+  const terrainAlt = map.queryTerrainElevation(coords);
+  
+  if (elevationDisplay) {
+    if (terrainAlt !== null && !isNaN(terrainAlt)) {
+      elevationDisplay.innerText = Math.floor(terrainAlt); // 隨地形即時跳動
+    } else {
+      // 備案：若地形未載入，抓最近的照片高度
+      let minD = Infinity, closestAlt = 0;
+      photoFeatures.forEach(f => {
+        const d = turf.distance(point, f);
+        if (d < minD) { minD = d; closestAlt = f.properties.altitude; }
+      });
+      elevationDisplay.innerText = Math.floor(closestAlt || 0);
+    }
+  }
+
+  // 照片彈出偵測
+  photoFeatures.forEach((f, i) => {
+    if (!shownPhotos.has(f.properties.id)) {
+      const d = turf.distance(point, f, { units: 'kilometers' });
+      if (d < 0.15) {
+        shownPhotos.add(f.properties.id);
+        showPhotoCard(f, i);
+      }
+    }
+  });
+
+  map.easeTo({
+    center: coords,
+    padding: { left: 350, right: 0, top: 0, bottom: 0 },
+    zoom: 15.5, pitch: 65, duration: 100
   });
 }
 
@@ -456,7 +432,6 @@ function animate(timestamp) {
     isPlaying = false;
     toggleButtons();
     updateDisplay(currentDistance);
-    
     setTimeout(showFinalSummary, 800); 
     return;
   }
