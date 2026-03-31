@@ -1,10 +1,12 @@
-/* 1. 基礎設定 */
-body {
+/* --- 1. 基礎佈局與地圖 --- */
+body, html {
     margin: 0;
     padding: 0;
+    width: 100%;
+    height: 100%;
     overflow: hidden;
-    background-color: #000;
-    height: 100vh;
+    background-color: #0f172a; /* 深藍底色，載入地圖前更自然 */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 #map {
@@ -12,51 +14,114 @@ body {
     top: 0;
     bottom: 0;
     width: 100%;
+    z-index: 0;
 }
 
-/* 2. UI 互動優化 */
+/* --- 2. UI 層次與毛玻璃效果 --- */
 #ui-overlay {
+    z-index: 40;
+    pointer-events: none; /* 確保 UI 層不干擾地圖拖動，子元素需手動開啟 pointer-events */
     user-select: none;
     -webkit-user-select: none;
 }
 
-.backdrop-blur-md {
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+/* 讓按鈕與卡片可以被點擊 */
+#ui-overlay > * {
+    pointer-events: auto;
 }
 
-/* 3. 右上角動畫彈出的照片卡 (動畫中) */
+.backdrop-blur-md {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    background-color: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+/* --- 3. 動態照片卡片 (播放中彈出) --- */
 #photo-card {
-    max-width: 280px;
-    transition: transform 0.2s ease, opacity 0.2s ease;
+    position: fixed;
+    top: 24px;
+    left: 24px; /* 配合 padding offset，放在左側 */
+    width: 320px;
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.1); /* 增加一點彈性感 */
     z-index: 50;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
 }
 
 #photo-card.hidden {
     opacity: 0;
+    transform: translateX(-20px) scale(0.95); /* 向左縮回隱藏 */
     pointer-events: none;
-    transform: translateY(-12px);
 }
 
-/* 4. 重點：最後綜覽畫面 (Popup) 的去背處理 */
-/* 使用更高的層級選取器確保生效 */
+#photo-card-img {
+    width: 100%;
+    height: 180px;
+    object-fit: cover;
+    border-radius: 8px 8px 0 0;
+}
+
+/* --- 4. 核心：最終綜覽畫面 (Popup) 去背與美化 --- */
+
+/* 確保 Popup 容器本身不佔空間且無背景 */
 .maplibregl-popup.final-summary-popup {
-    z-index: 10;
+    z-index: 30;
+    will-change: transform;
 }
 
 .final-summary-popup .maplibregl-popup-content {
-    background: transparent !important; /* 背景完全透明 */
+    background: transparent !important;
     background-color: transparent !important;
-    box-shadow: none !important;        /* 移除氣泡陰影 */
-    padding: 0 !important;             /* 移除預設內距 */
-    border: none !important;           /* 移除可能存在的預設邊框 */
+    box-shadow: none !important;
+    padding: 0 !important;
+    border: none !important;
 }
 
+/* 徹底移除白色尖角 */
 .final-summary-popup .maplibregl-popup-tip {
-    display: none !important;          /* 徹底隱藏白色小箭頭 */
+    display: none !important;
+}
+
+/* 綜覽照片本體美化 */
+.final-summary-popup div {
+    /* 這裡對應 JS 產生的包裹 div */
+    transition: transform 0.3s ease;
+}
+
+.final-summary-popup div:hover {
+    transform: scale(1.1); /* 滑鼠懸停稍微放大 */
+    z-index: 100;
 }
 
 .final-summary-popup img {
-    box-shadow: 0 4px 15px rgba(0,0,0,0.5); /* 給圖片一點陰影，讓它在衛星圖上更立體 */
-    border: 1px solid rgba(255,255,255,0.2); /* 加上極細的半透明邊框增加質感 */
+    display: block;
+    width: 120px; /* 控制綜覽照片寬度 */
+    height: auto;
+    border-radius: 6px;
+    border: 2px solid #ffffff !important; /* 白色亮邊框 */
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6) !important; /* 強烈陰影使其立體 */
+}
+
+/* --- 5. 底部控制列美化 --- */
+.control-bar {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 12px;
+    padding: 8px 20px;
+    border-radius: 9999px;
+    background: rgba(15, 23, 42, 0.8);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: white;
+}
+
+/* --- 6. 響應式微調 --- */
+@media (max-width: 640px) {
+    #photo-card {
+        width: calc(100% - 48px);
+        left: 24px;
+    }
 }
