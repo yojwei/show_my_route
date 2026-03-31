@@ -62,7 +62,7 @@ function initMap() {
       terrain: { source: 'terrain-source', exaggeration: 1.5 }
     },
     center: [120.9738, 23.9756],
-    zoom: 7.5,
+    zoom: 6,
     pitch: 0,
     bearing: 0
   });
