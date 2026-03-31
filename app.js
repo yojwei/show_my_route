@@ -164,7 +164,7 @@ async function updateRoute(coords) {
     map.getSource('route').setData(routeLine);
     
     const bbox = turf.bbox(routeLine);
-    const leftPad = window.innerWidth < 800 ? 100 : 200;
+    const leftPad = window.innerWidth < 800 ? 100 : 300;
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
         padding: { left: leftPad, right: 100, top: 100, bottom: 100 },
         duration: 1500
@@ -215,7 +215,7 @@ function updateDisplay(dist) {
     });
 
     const config = speedConfigs[currentSpeedIndex];
-    const leftPad = window.innerWidth < 800 ? 0 : 200;
+    const leftPad = window.innerWidth < 800 ? 0 : 300;
     map.easeTo({ 
         center: coords, 
         zoom: currentSpeedIndex === 0 ? 18 : config.zoom, 
@@ -240,7 +240,7 @@ function showFinalSummary() {
 
     photoFeatures.forEach((f) => {
         const popup = new maplibregl.Popup({ closeButton: false, maxWidth: '120px', className: 'final-summary-popup' })
-            .setLngLat([f.geometry.coordinates[0], f.geometry.coordinates[1] + 0.0005])
+            .setLngLat([f.geometry.coordinates[0], f.geometry.coordinates[1] + 0.01])
             .setHTML(`<div><img src="${f.properties.objectUrl}"></div>`)
             .addTo(map);
         finalPopups.push(popup);
@@ -248,7 +248,7 @@ function showFinalSummary() {
 
     const bbox = turf.bbox(routeLine);
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
-        padding: { left: window.innerWidth < 800 ? 50 : 450, right: 100, top: 100, bottom: 100 }, 
+        padding: { left: window.innerWidth < 800 ? 50 : 300, right: 100, top: 100, bottom: 100 }, 
         pitch: 0, duration: 2500
     });
 }
