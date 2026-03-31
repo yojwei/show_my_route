@@ -14,7 +14,7 @@ let activePopup = null;
 let photoCardTimeout = null;
 let photoDateRange = { min: null, max: null };
 let photoDisplayPoints = [];
-let finalPopups = []; // 用於存放結尾生成的彈出視窗，方便清除
+let finalPopups = []; 
 
 // --- DOM 元件 ---
 const photoCard = document.getElementById('photo-card');
@@ -323,7 +323,19 @@ function updateRoute(coords) {
   map?.getSource('point')?.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: coords[0] } });
 
   const bbox = turf.bbox(routeLine);
-  map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 80, duration: 2000 });
+
+  // 1. 初始路徑預覽避開左側卡片
+  map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
+    padding: { 
+      top: 80, 
+      bottom: 80, 
+      left: 420,  // 左側預留空間
+      right: 80 
+    },
+    duration: 2000,
+    essential: true
+  });
+
   document.getElementById('route-subtitle').innerText = `包含 ${coords.length} 個點位`;
 }
 
@@ -339,23 +351,18 @@ function showPhotoCard(feature, index) {
   }, 3500);
 }
 
-// 新增功能: 計算不遮蓋路徑的偏移經緯度
 function getOffsetPhotoPosition(map, lonLat) {
     const pixel = map.project(lonLat);
-    // 向右上方偏移，避免蓋住原本的點與線
     const offsetPixel = { x: pixel.x + 45, y: pixel.y - 45 };
     return map.unproject(offsetPixel);
 }
 
-// 新增功能: 顯示最終結算畫面 (顯示所有照片圖卡 + 自動縮放)
 function showFinalSummary() {
     if (photoFeatures.length === 0) return;
 
-    // 先清除之前的彈窗
     finalPopups.forEach(p => p.remove());
     finalPopups = [];
 
-    // 遍歷所有照片，生成圖卡
     photoFeatures.forEach((f) => {
         const offsetCoords = getOffsetPhotoPosition(map, f.geometry.coordinates);
         
@@ -363,12 +370,12 @@ function showFinalSummary() {
             closeButton: false, 
             closeOnClick: false,
             maxWidth: '120px',
-            offset: [0, 0],
+            offset: [0, -10], // 稍微上移避免蓋住線條
             className: 'final-summary-popup'
         })
             .setLngLat(offsetCoords)
             .setHTML(`
-                <div style="border: 2px solid white; border-radius: 6px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.4);">
+                <div style="border: 2px solid white; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
                     <img src="${f.properties.objectUrl}" style="width: 100%; display: block; object-fit: cover; height: 80px;">
                 </div>
             `)
@@ -376,13 +383,14 @@ function showFinalSummary() {
         finalPopups.push(popup);
     });
 
-    // 自動縮放到適合大小，包含所有點與照片
+    // 2. 最終畫面避開左側卡片
     const bbox = turf.bbox(routeLine);
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
-        padding: 120, // 增加邊距以容納偏移後的照片圖卡
+        padding: { top: 100, bottom: 100, left: 200, right: 100 }, 
         duration: 2500,
-        pitch: 0,     // 回到平面視角以便觀看全貌
-        bearing: 0
+        pitch: 0,
+        bearing: 0,
+        essential: true
     });
 }
 
@@ -407,9 +415,10 @@ function updateDisplay(dist) {
     }
   });
 
-  // 動畫進行中的動態視角
+  // 3. 動畫跟隨時避開左側卡片
   map.easeTo({
     center: point.geometry.coordinates,
+    padding: { left: 350, right: 0, top: 0, bottom: 0 }, // 視角中心向右偏移
     zoom: 15.5,
     pitch: 65,
     duration: 100
@@ -432,7 +441,6 @@ function animate(timestamp) {
     toggleButtons();
     updateDisplay(currentDistance);
     
-    // --- 觸發結算畫面功能 ---
     setTimeout(showFinalSummary, 800); 
     return;
   }
@@ -445,7 +453,6 @@ function animate(timestamp) {
 playBtn.addEventListener('click', () => {
   if (!routeLine) return alert('請先上傳照片');
   
-  // 重啟時清除舊的圖卡
   finalPopups.forEach(p => p.remove());
   finalPopups = [];
 
