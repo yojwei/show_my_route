@@ -68,7 +68,6 @@ function initMap() {
   });
 
   map.on('load', () => {
-    // --- 路線預覽（白色虛線） ---
     map.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
     map.addLayer({
       id: 'route-preview',
@@ -82,7 +81,6 @@ function initMap() {
       }
     });
 
-    // --- 動畫路線（藍色實線） ---
     map.addSource('route-progress', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
     map.addLayer({
       id: 'route-progress',
@@ -97,7 +95,6 @@ function initMap() {
       }
     });
 
-    // --- 動畫點（小圓點） ---
     map.addSource('point', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [] } } });
     map.addLayer({
       id: 'point-circle',
@@ -111,7 +108,6 @@ function initMap() {
       }
     });
 
-    // --- 照片群集與標記 ---
     map.addSource('photos', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
@@ -144,9 +140,7 @@ function initMap() {
         'text-size': 13,
         'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold']
       },
-      paint: {
-        'text-color': '#fff'
-      }
+      paint: { 'text-color': '#fff' }
     });
 
     map.addLayer({
@@ -204,8 +198,6 @@ function initMap() {
     map.on('mouseleave', 'photo-cluster-count', clearPointer);
     map.on('mouseenter', 'photo-markers', setPointer);
     map.on('mouseleave', 'photo-markers', clearPointer);
-
-    console.log('地圖已加載，顯示台灣衛星雲圖');
   });
 }
 
@@ -232,9 +224,7 @@ if (uploadInput) {
             const latRef = EXIF.getTag(this, 'GPSLatitudeRef') || 'N';
             const lonRef = EXIF.getTag(this, 'GPSLongitudeRef') || 'E';
             const date = EXIF.getTag(this, 'DateTimeOriginal');
-            const formattedDate = date
-              ? date.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1/$2/$3')
-              : null;
+            const formattedDate = date ? date.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1/$2/$3') : null;
 
             resolve({
               coords: (lat && lon) ? [toDec(lon, lonRef), toDec(lat, latRef)] : null,
@@ -247,7 +237,6 @@ if (uploadInput) {
       })
     );
 
-    // 清理舊資料與 URL
     if (activePopup) activePopup.remove();
     photoFeatures.forEach(f => URL.revokeObjectURL(f.properties.objectUrl));
     photoDisplayPoints.forEach(p => p.objectUrl && URL.revokeObjectURL(p.objectUrl));
@@ -275,7 +264,6 @@ if (uploadInput) {
       });
     });
 
-    // 建立 photoDisplayPoints（方便截圖與日期顯示）
     photoDisplayPoints = photoFeatures.map(f => {
       const timeStr = f.properties.time || null;
       const dateObj = timeStr ? new Date(timeStr) : null;
@@ -288,7 +276,6 @@ if (uploadInput) {
       };
     });
 
-    // 計算日期區間
     photoDateRange = { min: null, max: null };
     photoDisplayPoints.forEach(p => {
       if (!p.date) return;
@@ -301,7 +288,6 @@ if (uploadInput) {
       photosSource.setData({ type: 'FeatureCollection', features: photoFeatures });
     }
 
-    // 無 GPS 警告
     let noGpsWarning = document.getElementById('no-gps-warning');
     if (!noGpsWarning) {
       noGpsWarning = document.createElement('p');
@@ -309,52 +295,21 @@ if (uploadInput) {
       noGpsWarning.className = 'text-xs text-yellow-400 mt-2';
       document.getElementById('route-subtitle').after(noGpsWarning);
     }
-    noGpsWarning.textContent = noGpsPhotos.length > 0
-      ? `⚠ ${noGpsPhotos.length} 張無 GPS：${noGpsPhotos.map(p => p.name).join('、')}`
-      : '';
+    noGpsWarning.textContent = noGpsPhotos.length > 0 ? `⚠ ${noGpsPhotos.length} 張無 GPS` : '';
 
-    // 依時間排序 GPS 照片
     const gpsPhotos = photoFeatures.filter(f => f.properties.time);
     const noTimePhotos = photoFeatures.filter(f => !f.properties.time);
     gpsPhotos.sort((a, b) => new Date(a.properties.time) - new Date(b.properties.time));
     photoFeatures = [...gpsPhotos, ...noTimePhotos];
 
     const coords = photoFeatures.map(f => f.geometry.coordinates);
-    if (coords.length >= 2) {
-      updateRoute(coords);
-    } else {
-      routeLine = null;
-      totalDistance = 0;
-      currentDistance = 0;
-      isPlaying = false;
-      toggleButtons();
-      if (animationId) {
-        cancelAnimationFrame(animationId);
-        animationId = null;
-      }
-      const routeSource = map?.getSource('route');
-      if (routeSource) routeSource.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } });
-      const progressSource = map?.getSource('route-progress');
-      if (progressSource) progressSource.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } });
-      const pointSource = map?.getSource('point');
-      if (pointSource) pointSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [] } });
-
-      distanceDisplay.innerText = '0.0';
-      elevationDisplay.innerText = '---';
-
-      const subtitle = document.getElementById('route-subtitle');
-      if (coords.length === 1) {
-        subtitle.innerText = '包含 1 個點位（需至少 2 個點才能生成路線）';
-      } else {
-        subtitle.innerText = '照片中無足夠 GPS 資訊以生成路線';
-      }
-    }
-
+    if (coords.length >= 2) updateRoute(coords);
+    
     e.target.value = '';
   });
 }
 
-// --- 3. 路徑與動畫 ---
+// --- 3. 路徑與動畫邏輯 ---
 
 function updateRoute(coords) {
   routeLine = turf.lineString(coords);
@@ -363,35 +318,66 @@ function updateRoute(coords) {
   isPlaying = false;
   toggleButtons();
 
-  const routeSource = map?.getSource('route');
-  if (routeSource) routeSource.setData(routeLine);
-
-  const progressSource = map?.getSource('route-progress');
-  if (progressSource) progressSource.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } });
-
-  const pointSource = map?.getSource('point');
-  if (pointSource) pointSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: coords[0] } });
+  map?.getSource('route')?.setData(routeLine);
+  map?.getSource('route-progress')?.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } });
+  map?.getSource('point')?.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: coords[0] } });
 
   const bbox = turf.bbox(routeLine);
   map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 80, duration: 2000 });
-
   document.getElementById('route-subtitle').innerText = `包含 ${coords.length} 個點位`;
 }
 
-// 動畫主循環
-function animate(timestamp) {
-  if (!isPlaying) {
-    animationId = null;
-    return;
-  }
+// 顯示右側照片卡
+function showPhotoCard(feature, index) {
+  if (!photoCard) return;
+  photoCardImg.src = feature.properties.objectUrl;
+  photoCardLabel.textContent = `照片 #${index + 1} · ${feature.properties.time || '時間不明'}`;
+  photoCard.classList.remove('hidden');
 
+  if (photoCardTimeout) clearTimeout(photoCardTimeout);
+  photoCardTimeout = setTimeout(() => {
+    photoCard.classList.add('hidden');
+  }, 3500);
+}
+
+// 動畫更新顯示
+function updateDisplay(dist) {
+  const point = turf.along(routeLine, dist, { units: 'kilometers' });
+  const progressLine = turf.lineSlice(turf.point(routeLine.geometry.coordinates[0]), point, routeLine);
+
+  map?.getSource('route-progress')?.setData(progressLine);
+  map?.getSource('point')?.setData(point);
+  distanceDisplay.innerText = dist.toFixed(2);
+
+  const elev = map.queryTerrainElevation ? map.queryTerrainElevation(point.geometry.coordinates) : null;
+  elevationDisplay.innerText = Number.isFinite(elev) ? Math.floor(elev) : '---';
+
+  // --- 照片跳出偵測 ---
+  photoFeatures.forEach((f, i) => {
+    if (!shownPhotos.has(f.properties.id)) {
+      const d = turf.distance(point, f, { units: 'kilometers' });
+      if (d < 0.15) { // 距離小於 150 公尺即觸發
+        shownPhotos.add(f.properties.id);
+        showPhotoCard(f, i);
+      }
+    }
+  });
+
+  map.easeTo({
+    center: point.geometry.coordinates,
+    zoom: 15,
+    pitch: 65,
+    duration: 100
+  });
+}
+
+function animate(timestamp) {
+  if (!isPlaying) { animationId = null; return; }
   if (!lastTime) lastTime = timestamp;
   const delta = timestamp - lastTime;
   lastTime = timestamp;
 
   if (!routeLine) return;
-
-  // 每秒 1 km 為基礎速度，乘以播放倍速
   const speed = (1 / 1000) * playbackSpeed;
   currentDistance += speed * delta;
 
@@ -399,49 +385,21 @@ function animate(timestamp) {
     currentDistance = totalDistance;
     isPlaying = false;
     toggleButtons();
-  }
-
-  const point = turf.along(routeLine, currentDistance, { units: 'kilometers' });
-  const progressLine = turf.lineSlice(
-    turf.point(routeLine.geometry.coordinates[0]),
-    point,
-    routeLine
-  );
-
-  const progressSource = map?.getSource('route-progress');
-  if (progressSource) progressSource.setData(progressLine);
-
-  map?.getSource('point')?.setData(point);
-  distanceDisplay.innerText = currentDistance.toFixed(2);
-
-  const elev = map.queryTerrainElevation
-    ? map.queryTerrainElevation(point.geometry.coordinates)
-    : null;
-  elevationDisplay.innerText = Number.isFinite(elev) ? Math.floor(elev) : '---';
-
-  map.easeTo({
-    center: point.geometry.coordinates,
-    zoom: 15,
-    pitch: 65,
-    bearing: 0,
-    duration: 100
-  });
-
-  animationId = requestAnimationFrame(animate);
-}
-
-// 動作按鈕：播放 / 暫停
-playBtn.addEventListener('click', () => {
-  if (!routeLine) {
-    alert('請先上傳照片並生成路徑');
+    updateDisplay(currentDistance);
     return;
   }
 
+  updateDisplay(currentDistance);
+  animationId = requestAnimationFrame(animate);
+}
+
+// 按鈕事件
+playBtn.addEventListener('click', () => {
+  if (!routeLine) return alert('請先上傳照片');
   if (currentDistance >= totalDistance) {
     currentDistance = 0;
     shownPhotos.clear();
   }
-
   isPlaying = true;
   lastTime = 0;
   toggleButtons();
@@ -451,15 +409,12 @@ playBtn.addEventListener('click', () => {
 pauseBtn.addEventListener('click', () => {
   isPlaying = false;
   toggleButtons();
-  if (animationId) {
-    cancelAnimationFrame(animationId);
-    animationId = null;
-  }
+  if (animationId) cancelAnimationFrame(animationId);
 });
 
 function toggleButtons() {
-    playBtn.classList.toggle('hidden', isPlaying);
-    pauseBtn.classList.toggle('hidden', !isPlaying);
+  playBtn.classList.toggle('hidden', isPlaying);
+  pauseBtn.classList.toggle('hidden', !isPlaying);
 }
 
 // 截圖與下載邏輯 (修正版)
