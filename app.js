@@ -363,7 +363,8 @@ function showFinalSummary() {
             closeButton: false, 
             closeOnClick: false,
             maxWidth: '120px',
-            offset: [0, 0]
+            offset: [0, 0],
+            className: 'final-summary-popup'
         })
             .setLngLat(offsetCoords)
             .setHTML(`

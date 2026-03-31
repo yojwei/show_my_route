@@ -4,37 +4,25 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>3D 路線動畫製作工具</title>
-  <!-- MapLibre GL JS -->
+  
   <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
 
-  <!-- Turf.js（用於計算距離、切線等） -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 
-  <!-- Tailwind CSS（樣式框架） -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- EXIF.js（讀取相片 GPS 資訊） -->
   <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
 
-  <style>
-    body { margin: 0; padding: 0; overflow: hidden; background: #000; }
-    #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-    .backdrop-blur-md { backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
-    [contenteditable]:focus { outline: none; }
-  </style>
+  <link rel="stylesheet" href="style.css">
 </head>
-<body class="text-white font-sans">
+<body class="text-white font-sans bg-black">
 
-  <!-- 地圖容器 -->
   <div id="map"></div>
 
-  <!-- UI 浮動層 -->
   <div id="ui-overlay" class="absolute inset-0 z-40 pointer-events-none flex flex-col justify-between p-6">
 
-    <!-- 左上資訊區 -->
     <div class="flex flex-col gap-4 items-start pointer-events-auto w-80">
-
       <div class="bg-black/60 backdrop-blur-md rounded-2xl p-5 border border-white/10 shadow-xl w-full">
         <div class="flex items-center justify-between mb-1 group">
           <h1 id="route-title"
@@ -67,7 +55,6 @@
         </div>
       </div>
 
-      <!-- 動作按鈕區 -->
       <div class="bg-black/60 backdrop-blur-md rounded-full p-2 border border-white/10 shadow-xl w-full flex items-center justify-between px-3 pointer-events-auto">
         <label for="photo-upload" class="p-3 hover:bg-white/10 rounded-full transition-all cursor-pointer group" title="新增照片並取代軌跡">
           <svg class="w-6 h-6 text-blue-400 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -78,15 +65,13 @@
 
         <button id="share-btn" class="p-3 hover:bg-white/10 rounded-full transition-all group" title="分享畫面 (截圖)">
           <svg class="w-6 h-6 text-gray-300 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316M18 12a3 3 0 100-6 3 3 0 000 6zM6 18a3 3 0 100-6 3 3 0 000 6z"></path>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316M18 12a3 3 0 100-6 3 3 0 000 6zM6 18a3 3 0 100-6 3 3 0 000 6z"></path>
           </svg>
         </button>
 
         <button id="view-toggle-btn" class="p-3 hover:bg-white/10 rounded-full transition-all group" title="切換 2D/3D">
           <svg class="w-6 h-6 text-gray-300 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path>
           </svg>
         </button>
 
@@ -96,7 +81,6 @@
       </div>
     </div>
 
-    <!-- 右上照片卡 -->
     <div id="photo-card" class="hidden absolute right-6 top-32 w-64 z-50 bg-black/80 rounded-xl border border-white/20 shadow-xl overflow-hidden pointer-events-auto">
       <div class="flex items-center justify-between p-2 bg-black/60">
         <span id="photo-card-label" class="text-xs text-gray-100">照片</span>
@@ -105,28 +89,22 @@
       <img id="photo-card-img" src="" alt="照片預覽" class="w-full h-40 object-cover" />
     </div>
 
-    <!-- 下方播放按鈕 -->
     <div class="flex justify-center pb-8 pointer-events-auto">
       <div class="bg-black/60 backdrop-blur-md rounded-full p-2 flex gap-4 border border-white/10 shadow-2xl">
         <button id="play-btn" class="bg-blue-600 hover:bg-blue-500 text-white rounded-full p-4 transition-transform hover:scale-110">
           <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
-            <path fill-rule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
-                  clip-rule="evenodd"></path>
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"></path>
           </svg>
         </button>
         <button id="pause-btn" class="bg-gray-700 hover:bg-gray-600 text-white rounded-full p-4 hidden transition-transform hover:scale-110">
           <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
-            <path fill-rule="evenodd"
-                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z"
-                  clip-rule="evenodd"></path>
+            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"></path>
           </svg>
         </button>
       </div>
     </div>
   </div>
 
-  <!-- 外部 JS 檔 -->
   <script src="app.js"></script>
 </body>
 </html>

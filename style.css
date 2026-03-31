@@ -1,4 +1,12 @@
-/* 讓地圖填滿整個螢幕 */
+/* 1. 基礎設定 */
+body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #000;
+    height: 100vh;
+}
+
 #map {
     position: absolute;
     top: 0;
@@ -6,23 +14,22 @@
     width: 100%;
 }
 
-/* 確保 body 沒有邊距 */
-body {
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-    background-color: #000;
-}
-
-/* 針對行動裝置優化 UI 文字不被選取 */
+/* 2. UI 互動優化 */
 #ui-overlay {
     user-select: none;
     -webkit-user-select: none;
 }
 
+.backdrop-blur-md {
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+/* 3. 右上角動畫彈出的照片卡 (動畫中) */
 #photo-card {
     max-width: 280px;
     transition: transform 0.2s ease, opacity 0.2s ease;
+    z-index: 50;
 }
 
 #photo-card.hidden {
@@ -31,9 +38,20 @@ body {
     transform: translateY(-12px);
 }
 
-#photo-card img {
-    display: block;
-    width: 100%;
-    height: 160px;
-    object-fit: cover;
+/* 4. 重點：最後綜覽畫面 (Popup) 的去背處理 */
+/* 使用更高的層級選取器確保生效 */
+.maplibregl-popup.final-summary-popup {
+    z-index: 10;
+}
+
+.final-summary-popup .maplibregl-popup-content {
+    background: transparent !important; /* 背景完全透明 */
+    background-color: transparent !important;
+    box-shadow: none !important;        /* 移除氣泡陰影 */
+    padding: 0 !important;             /* 移除預設內距 */
+    border: none !important;           /* 移除可能存在的預設邊框 */
+}
+
+.final-summary-popup .maplibregl-popup-tip {
+    display: none !important;          /* 徹底隱藏白色小箭頭 */
 }
