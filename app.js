@@ -1,23 +1,17 @@
 // --- 全域變數 ---
 let map;
 let routeLine = null;
-let totalDistance = 0;
-let currentDistance = 0;
 let isPlaying = false;
 let animationId = null;
-let lastTime = 0;
 let photoFeatures = [];
 let shownPhotos = new Set();
 let finalPopups = []; 
 let photoCardTimeout = null;
 
-// --- 速度與視角配置 (目標時間導向) ---
-const speedConfigs = [
-    { duration: 30, icon: 'footprints', label: '慢速巡航', zoom: 16, pitch: 60 }, 
-    { duration: 15, icon: 'car',        label: '標準快進', zoom: 12, pitch: 45 }, 
-    { duration: 5,  icon: 'bird',       label: '極速鳥瞰', zoom: 6,  pitch: 30 }
-];
-let currentSpeedIndex = 0;
+// --- 動態動畫變數 (新導入) ---
+let currentSegmentIndex = 0; 
+let segmentStartTime = 0;    
+const SEGMENT_DURATION = 2000; // 點與點之間固定跑 2 秒
 
 // --- DOM 元件 ---
 const uploadInput = document.getElementById('photo-upload');
@@ -28,8 +22,6 @@ const distanceDisplay = document.getElementById('distance-display');
 const elevationDisplay = document.getElementById('elevation-display');
 const playBtn = document.getElementById('play-btn');
 const pauseBtn = document.getElementById('pause-btn');
-const speedBtn = document.getElementById('speed-btn');
-const iconContainer = document.getElementById('speed-icon-container');
 
 // --- 1. 初始化 ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -83,7 +75,7 @@ function setupLayers() {
     map.addLayer({ id: 'photo-markers', type: 'circle', source: 'photos', paint: { 'circle-radius': 8, 'circle-color': '#bfdbfe', 'circle-stroke-width': 2, 'circle-stroke-color': '#60a5fa' } });
 }
 
-// --- 2. 照片處理 ---
+// --- 2. 照片處理 (保留 EXIF 邏輯) ---
 if (uploadInput) uploadInput.addEventListener('change', handleUpload);
 
 async function handleUpload(e) {
@@ -121,11 +113,13 @@ async function handleUpload(e) {
         });
     }));
 
+    // 清理
     photoFeatures.forEach(f => URL.revokeObjectURL(f.properties.objectUrl));
     finalPopups.forEach(p => p.remove());
     finalPopups = [];
     photoFeatures = [];
     shownPhotos.clear();
+    currentSegmentIndex = 0;
 
     metadata.forEach((m, i) => {
         if (!m.coords) return;
@@ -143,80 +137,103 @@ async function handleUpload(e) {
     if (coords.length >= 2) await updateRoute(coords);
 }
 
-// --- 3. 路徑與定位 ---
+// --- 3. 路徑規劃 (功能補回：串接 OSRM API) ---
 async function updateRoute(coords) {
     const pointsStr = coords.map(c => `${c[0]},${c[1]}`).join(';');
     try {
+        // 使用 OSRM 進行真實道路規劃
         const resp = await fetch(`https://router.project-osrm.org/route/v1/driving/${pointsStr}?overview=full&geometries=geojson`);
         const data = await resp.json();
         if (data.code !== 'Ok') throw new Error();
         routeLine = data.routes[0].geometry;
     } catch {
+        // 失敗才回退到直線
         routeLine = turf.lineString(coords).geometry;
     }
 
-    totalDistance = turf.length(routeLine, { units: 'kilometers' });
-    currentDistance = 0;
     map.getSource('route').setData(routeLine);
-    
     const bbox = turf.bbox(routeLine);
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
         padding: { left: 400, right: 80, top: 80, bottom: 80 } 
     });
 }
 
-// --- 4. 動畫與照片顯示 ---
-function updateDisplay(dist) {
-    if (!routeLine) return;
-    const point = turf.along(routeLine, dist, { units: 'kilometers' });
-    const coords = point.geometry.coordinates;
+// --- 4. 核心動畫 (功能補回：海拔模擬 + 2秒節奏) ---
+function animate(timestamp) {
+    if (!isPlaying || photoFeatures.length < 2) return;
+    if (!segmentStartTime) segmentStartTime = timestamp;
 
-    const prog = turf.lineSlice(turf.point(routeLine.coordinates[0]), point, routeLine);
-    map.getSource('route-progress').setData(prog);
-    map.getSource('point').setData(point);
-    distanceDisplay.innerText = dist.toFixed(2);
+    const elapsed = timestamp - segmentStartTime;
+    const progress = Math.min(elapsed / SEGMENT_DURATION, 1);
 
-    let closest = null, minD = Infinity;
-    photoFeatures.forEach(f => {
-        const d = turf.distance(point, f, { units: 'kilometers' });
-        if (d < minD) { minD = d; closest = f; }
-    });
-    const baseAlt = closest ? closest.properties.altitude : 0;
+    // 取得當前路段照片座標
+    const startPhoto = photoFeatures[currentSegmentIndex];
+    const endPhoto = photoFeatures[currentSegmentIndex + 1];
+
+    // 在 OSRM 路徑中切割出這一段
+    const segmentLine = turf.lineSlice(startPhoto, endPhoto, routeLine);
+    // 根據 progress 找到該段落中的位置
+    const currentPoint = turf.along(segmentLine, turf.length(segmentLine) * progress, { units: 'kilometers' });
+    const coords = currentPoint.geometry.coordinates;
+
+    // --- UI 更新 ---
+    // 1. 更新點與進度線
+    map.getSource('point').setData(currentPoint);
+    const partialRoute = turf.lineSlice(turf.point(routeLine.coordinates[0]), currentPoint, routeLine);
+    map.getSource('route-progress').setData(partialRoute);
+
+    // 2. 海拔模擬 (功能補回：照片真實海拔 + DEM 差值)
+    const baseAlt = startPhoto.properties.altitude;
     const terrainNow = map.queryTerrainElevation(coords);
-    const terrainBase = closest ? map.queryTerrainElevation(closest.geometry.coordinates) : null;
-    let displayAlt = (terrainNow !== null && terrainBase !== null) ? baseAlt + (terrainNow - terrainBase) : baseAlt;
+    const terrainBase = map.queryTerrainElevation(startPhoto.geometry.coordinates);
+    
+    let displayAlt = baseAlt;
+    if (terrainNow !== null && terrainBase !== null) {
+        displayAlt = baseAlt + (terrainNow - terrainBase);
+    }
     elevationDisplay.innerText = Math.max(0, Math.floor(displayAlt));
 
-    photoFeatures.forEach((f, i) => {
-        if (!shownPhotos.has(f.properties.id)) {
-            if (turf.distance(point, f, { units: 'kilometers' }) < 0.1) {
-                shownPhotos.add(f.properties.id);
-                showPhotoCard(f, i);
-            }
+    // 3. 距離累計
+    const distSoFar = turf.length(partialRoute, { units: 'kilometers' });
+    distanceDisplay.innerText = distSoFar.toFixed(2);
+
+    // 4. 視角優化
+    if (progress === 0) {
+        const segDist = turf.length(segmentLine, { units: 'kilometers' });
+        let targetZoom = 15; 
+        if (segDist > 2) targetZoom = 13;
+        if (segDist > 10) targetZoom = 10;
+        
+        map.easeTo({ center: coords, zoom: targetZoom, pitch: 60, duration: 1000 });
+    } else {
+        map.setCenter(coords);
+    }
+
+    // 5. 照片彈出
+    if (progress < 0.1 && !shownPhotos.has(startPhoto.properties.id)) {
+        shownPhotos.add(startPhoto.properties.id);
+        showPhotoCard(startPhoto, currentSegmentIndex);
+    }
+
+    // 段落切換
+    if (progress >= 1) {
+        currentSegmentIndex++;
+        segmentStartTime = timestamp;
+        if (currentSegmentIndex >= photoFeatures.length - 1) {
+            isPlaying = false;
+            toggleButtons();
+            setTimeout(showFinalSummary, 800);
+            return;
         }
-    });
+    }
 
-    const config = speedConfigs[currentSpeedIndex];
-    map.easeTo({ 
-        center: coords, zoom: config.zoom, pitch: config.pitch, offset: [175, 0], duration: 100 
-    });
+    animationId = requestAnimationFrame(animate);
 }
 
-function showPhotoCard(f, i) {
-    photoCardImg.src = f.properties.objectUrl;
-    photoCardLabel.innerText = `照片 #${i+1}`;
-    photoCard.classList.remove('hidden');
-    clearTimeout(photoCardTimeout);
-    photoCardTimeout = setTimeout(() => photoCard.classList.add('hidden'), 3000);
-}
-
-// --- 5. 最終綜覽畫面 ---
-// 修正：讓照片緊貼藍色點點旁邊
+// --- 5. 最終綜覽畫面 (修正位移) ---
 function getOffsetPhotoPosition(map, lonLat, index) {
-    // 使用經緯度微調，這會確保無論縮放層級如何，照片都保持在點位附近的比例
-    const lngOffset = (index % 2 === 0) ? 0.0005 : -0.0005; // 左右交替偏移
-    const latOffset = 0.0008; // 向上偏移一點點，避免遮住點
-
+    const lngOffset = (index % 2 === 0) ? 0.0005 : -0.0005; 
+    const latOffset = 0.0008; 
     return [lonLat[0] + lngOffset, lonLat[1] + latOffset];
 }
 
@@ -226,12 +243,8 @@ function showFinalSummary() {
 
     photoFeatures.forEach((f, i) => {
         const offsetCoords = getOffsetPhotoPosition(map, f.geometry.coordinates, i);
-
         const popup = new maplibregl.Popup({ 
-            closeButton: false, 
-            maxWidth: '120px', 
-            anchor: 'center',
-            className: 'final-summary-popup' 
+            closeButton: false, maxWidth: '120px', anchor: 'center', className: 'final-summary-popup' 
         })
             .setLngLat(offsetCoords)
             .setHTML(`
@@ -243,49 +256,30 @@ function showFinalSummary() {
         finalPopups.push(popup);
     });
 
-    if (routeLine) {
-        const bbox = turf.bbox(routeLine);
-        map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
-            padding: { left: 450, right: 120, top: 120, bottom: 120 }, 
-            pitch: 0,
-            duration: 2500
-        });
-    }
+    const bbox = turf.bbox(routeLine);
+    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
+        padding: 120, pitch: 0, duration: 2500 
+    });
 }
 
-// --- 6. 播放邏輯 ---
-function animate(timestamp) {
-    if (!isPlaying) return;
-    if (!lastTime) lastTime = timestamp;
-    const delta = timestamp - lastTime;
-    lastTime = timestamp;
-
-    const targetDuration = speedConfigs[currentSpeedIndex].duration;
-    const distancePerMs = totalDistance / (targetDuration * 1000);
-    currentDistance += distancePerMs * delta;
-
-    if (currentDistance >= totalDistance) {
-        currentDistance = totalDistance;
-        isPlaying = false;
-        toggleButtons();
-        updateDisplay(currentDistance);
-        setTimeout(showFinalSummary, 800);
-        return;
-    }
-
-    updateDisplay(currentDistance);
-    animationId = requestAnimationFrame(animate);
+// --- 6. 控制與其他輔助 ---
+function showPhotoCard(f, i) {
+    photoCardImg.src = f.properties.objectUrl;
+    photoCardLabel.innerText = `照片 #${i+1}`;
+    photoCard.classList.remove('hidden');
+    clearTimeout(photoCardTimeout);
+    photoCardTimeout = setTimeout(() => photoCard.classList.add('hidden'), 3000);
 }
 
 playBtn.addEventListener('click', () => {
-    if (!routeLine) return alert('請先上傳照片');
-    if (currentDistance >= totalDistance) { 
-        currentDistance = 0; 
-        shownPhotos.clear(); 
-        finalPopups.forEach(p => p.remove()); 
+    if (!photoFeatures.length) return alert('請先上傳照片');
+    if (currentSegmentIndex >= photoFeatures.length - 1) {
+        currentSegmentIndex = 0;
+        shownPhotos.clear();
+        finalPopups.forEach(p => p.remove());
     }
     isPlaying = true;
-    lastTime = 0;
+    segmentStartTime = 0; 
     toggleButtons();
     animate(performance.now());
 });
@@ -299,15 +293,4 @@ pauseBtn.addEventListener('click', () => {
 function toggleButtons() {
     playBtn.classList.toggle('hidden', isPlaying);
     pauseBtn.classList.toggle('hidden', !isPlaying);
-}
-
-// --- 7. 速度切換 ---
-if (speedBtn) {
-    speedBtn.addEventListener('click', () => {
-        currentSpeedIndex = (currentSpeedIndex + 1) % speedConfigs.length;
-        const config = speedConfigs[currentSpeedIndex];
-        iconContainer.innerHTML = `<i data-lucide="${config.icon}" class="w-5 h-5 stroke-[1.5]"></i>`;
-        lucide.createIcons();
-        map.flyTo({ zoom: config.zoom, pitch: config.pitch, offset: [175, 0], duration: 1000 });
-    });
 }

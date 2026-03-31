@@ -11,12 +11,20 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
 
-  <link rel="stylesheet" href="style.css">
   <style>
     /* 確保字體平滑 */
     body { -webkit-font-smoothing: antialiased; }
     /* 修正 Lucide 圖標垂直對齊 */
     .lucide { display: inline-block; vertical-align: middle; }
+    /* 照片卡片去背與發光效果 */
+    .final-summary-popup .maplibregl-popup-content {
+      background: transparent !important;
+      padding: 0 !important;
+      box-shadow: none !important;
+    }
+    .final-summary-popup .maplibregl-popup-tip {
+      display: none;
+    }
   </style>
 </head>
 <body class="text-white font-sans bg-black">
@@ -59,7 +67,7 @@
       </div>
 
       <div class="bg-black/60 backdrop-blur-md rounded-full p-2 border border-white/10 shadow-xl w-full flex items-center justify-between px-3 pointer-events-auto">
-        <label for="photo-upload" class="p-3 hover:bg-white/10 rounded-full transition-all cursor-pointer group" title="新增照片並取代軌跡">
+        <label for="photo-upload" class="p-3 hover:bg-white/10 rounded-full transition-all cursor-pointer group" title="新增照片">
           <svg class="w-6 h-6 text-blue-400 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
           </svg>
@@ -78,9 +86,9 @@
           </svg>
         </button>
 
-        <button id="speed-btn" class="flex items-center justify-center w-10 h-10 hover:bg-white/10 rounded-full transition-all text-gray-400 hover:text-white group" title="步行模式">
+        <button id="speed-btn" class="flex items-center justify-center w-10 h-10 hover:bg-white/10 rounded-full transition-all text-gray-400 hover:text-white group" title="導覽節奏">
           <div id="speed-icon-container" class="flex items-center justify-center pointer-events-none">
-              <i data-lucide="footprints" class="w-5 h-5 stroke-[1.5]"></i>
+              <i data-lucide="timer" class="w-5 h-5 stroke-[1.5]"></i>
           </div>
         </button>
       </div>
