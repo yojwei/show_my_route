@@ -7,26 +7,29 @@
   
   <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
-
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
-
   <script src="https://cdn.tailwindcss.com"></script>
-
   <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
 
   <link rel="stylesheet" href="style.css">
+  <style>
+    /* 確保字體平滑 */
+    body { -webkit-font-smoothing: antialiased; }
+    /* 修正 Lucide 圖標垂直對齊 */
+    .lucide { display: inline-block; vertical-align: middle; }
+  </style>
 </head>
 <body class="text-white font-sans bg-black">
 
-  <div id="map"></div>
+  <div id="map" class="absolute inset-0"></div>
 
   <div id="ui-overlay" class="absolute inset-0 z-40 pointer-events-none flex flex-col justify-between p-6">
 
-    <div class="flex flex-col gap-4 items-start pointer-events-auto w-80">
-      <div class="bg-black/60 backdrop-blur-md rounded-2xl p-5 border border-white/10 shadow-xl w-full">
+    <div class="flex flex-col gap-4 items-start w-80">
+      <div class="bg-black/60 backdrop-blur-md rounded-2xl p-5 border border-white/10 shadow-xl w-full pointer-events-auto">
         <div class="flex items-center justify-between mb-1 group">
           <h1 id="route-title"
-              class="text-xl font-bold tracking-wider text-blue-400 cursor-pointer hover:bg-white/5 px-1 rounded transition-all focus:ring-1 focus:ring-blue-500/50"
+              class="text-xl font-bold tracking-wider text-blue-400 cursor-pointer hover:bg-white/5 px-1 rounded transition-all focus:outline-none focus:ring-1 focus:ring-blue-500/50"
               contenteditable="true"
               spellcheck="false"
               title="點擊修改軌跡名稱">
@@ -40,14 +43,14 @@
         <div class="grid grid-cols-2 gap-4">
           <div>
             <p class="text-[10px] text-gray-500 uppercase font-bold">目前距離</p>
-            <p class="text-2xl font-mono font-bold">
+            <p class="text-2xl font-mono font-bold text-white">
               <span id="distance-display">0.0</span>
               <span class="text-sm font-sans text-gray-400">km</span>
             </p>
           </div>
           <div>
             <p class="text-[10px] text-gray-500 uppercase font-bold">當前海拔</p>
-            <p class="text-2xl font-mono font-bold">
+            <p class="text-2xl font-mono font-bold text-white">
               <span id="elevation-display">---</span>
               <span class="text-sm font-sans text-gray-400">m</span>
             </p>
@@ -63,10 +66,10 @@
           <input type="file" id="photo-upload" multiple accept="image/*" class="hidden" />
         </label>
 
-       <button id="share-btn" class="p-3 hover:bg-white/10 rounded-full transition-all group" title="分享畫面 (截圖)">
-        <svg class="w-6 h-6 text-gray-300 group-hover:text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 8.25H7.5a2.25 2.25 0 0 0-2.25 2.25v9a2.25 2.25 0 0 0 2.25 2.25h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25H15M9 12l3 3m0 0 3-3m-3 3V2.25" />
-        </svg>
+        <button id="share-btn" class="p-3 hover:bg-white/10 rounded-full transition-all group" title="分享畫面 (截圖)">
+          <svg class="w-6 h-6 text-gray-300 group-hover:text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l3 3m0 0 3-3m-3 3V2.25M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z" />
+          </svg>
         </button>
 
         <button id="view-toggle-btn" class="p-3 hover:bg-white/10 rounded-full transition-all group" title="切換 2D/3D">
@@ -75,28 +78,34 @@
           </svg>
         </button>
 
-        <button id="speed-btn" class="px-4 py-2 hover:bg-white/10 rounded-full transition-all text-xs font-mono font-bold text-gray-300 hover:text-white">
-          1.0x
+        <button id="speed-btn" class="flex items-center justify-center w-10 h-10 hover:bg-white/10 rounded-full transition-all text-gray-400 hover:text-white group" title="步行模式">
+          <div id="speed-icon-container" class="flex items-center justify-center pointer-events-none">
+              <i data-lucide="footprints" class="w-5 h-5 stroke-[1.5]"></i>
+          </div>
         </button>
       </div>
     </div>
 
-    <div id="photo-card" class="hidden absolute right-6 top-32 w-64 z-50 bg-black/80 rounded-xl border border-white/20 shadow-xl overflow-hidden pointer-events-auto">
-      <div class="flex items-center justify-between p-2 bg-black/60">
-        <span id="photo-card-label" class="text-xs text-gray-100">照片</span>
-        <button id="photo-card-close" class="text-gray-300 hover:text-white text-xs">關閉</button>
+    <div id="photo-card" class="hidden absolute right-6 top-32 w-64 z-50 bg-black/80 backdrop-blur-md rounded-xl border border-white/20 shadow-xl overflow-hidden pointer-events-auto">
+      <div class="flex items-center justify-between p-2 bg-white/5">
+        <span id="photo-card-label" class="text-[10px] uppercase tracking-widest text-gray-400">照片紀錄</span>
+        <button id="photo-card-close" class="p-1 hover:bg-white/10 rounded-full transition-colors">
+          <svg class="w-4 h-4 text-gray-400 hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
       </div>
-      <img id="photo-card-img" src="" alt="照片預覽" class="w-full h-40 object-cover" />
+      <img id="photo-card-img" src="" alt="照片預覽" class="w-full h-40 object-cover bg-gray-900" />
     </div>
 
-    <div class="flex justify-center pb-8 pointer-events-auto">
-      <div class="bg-black/60 backdrop-blur-md rounded-full p-2 flex gap-4 border border-white/10 shadow-2xl">
-        <button id="play-btn" class="bg-blue-600 hover:bg-blue-500 text-white rounded-full p-4 transition-transform hover:scale-110">
+    <div class="flex justify-center pb-8">
+      <div class="bg-black/60 backdrop-blur-md rounded-full p-2 flex gap-4 border border-white/10 shadow-2xl pointer-events-auto">
+        <button id="play-btn" class="bg-blue-600 hover:bg-blue-500 text-white rounded-full p-4 transition-all hover:scale-110 active:scale-95 shadow-lg shadow-blue-500/20">
           <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
             <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"></path>
           </svg>
         </button>
-        <button id="pause-btn" class="bg-gray-700 hover:bg-gray-600 text-white rounded-full p-4 hidden transition-transform hover:scale-110">
+        <button id="pause-btn" class="bg-gray-700 hover:bg-gray-600 text-white rounded-full p-4 hidden transition-all hover:scale-110 active:scale-95">
           <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
             <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"></path>
           </svg>
@@ -105,6 +114,14 @@
     </div>
   </div>
 
+  <script src="https://unpkg.com/lucide@latest"></script>
   <script src="app.js"></script>
+  
+  <script>
+    // 額外修復：處理照片卡片的關閉按鈕
+    document.getElementById('photo-card-close').addEventListener('click', () => {
+      document.getElementById('photo-card').classList.add('hidden');
+    });
+  </script>
 </body>
 </html>

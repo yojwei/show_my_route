@@ -55,3 +55,8 @@ body {
 .final-summary-popup .maplibregl-popup-tip {
     display: none !important;          /* 徹底隱藏白色小箭頭 */
 }
+
+.final-summary-popup img {
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5); /* 給圖片一點陰影，讓它在衛星圖上更立體 */
+    border: 1px solid rgba(255,255,255,0.2); /* 加上極細的半透明邊框增加質感 */
+}
