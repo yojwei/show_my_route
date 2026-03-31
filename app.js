@@ -83,7 +83,7 @@ function setupLayers() {
     map.addLayer({ id: 'photo-markers', type: 'circle', source: 'photos', paint: { 'circle-radius': 8, 'circle-color': '#bfdbfe', 'circle-stroke-width': 2, 'circle-stroke-color': '#60a5fa' } });
 }
 
-// --- 2. 照片處理 (EXIF) ---
+// --- 2. 照片處理 ---
 if (uploadInput) uploadInput.addEventListener('change', handleUpload);
 
 async function handleUpload(e) {
@@ -143,7 +143,7 @@ async function handleUpload(e) {
     if (coords.length >= 2) await updateRoute(coords);
 }
 
-// --- 3. 路徑規劃與自動定位 ---
+// --- 3. 路徑與定位 ---
 async function updateRoute(coords) {
     const pointsStr = coords.map(c => `${c[0]},${c[1]}`).join(';');
     try {
@@ -165,7 +165,7 @@ async function updateRoute(coords) {
     });
 }
 
-// --- 4. 核心動畫顯示 ---
+// --- 4. 動畫與照片顯示 ---
 function updateDisplay(dist) {
     if (!routeLine) return;
     const point = turf.along(routeLine, dist, { units: 'kilometers' });
@@ -176,7 +176,6 @@ function updateDisplay(dist) {
     map.getSource('point').setData(point);
     distanceDisplay.innerText = dist.toFixed(2);
 
-    // 高度計算
     let closest = null, minD = Infinity;
     photoFeatures.forEach(f => {
         const d = turf.distance(point, f, { units: 'kilometers' });
@@ -188,7 +187,6 @@ function updateDisplay(dist) {
     let displayAlt = (terrainNow !== null && terrainBase !== null) ? baseAlt + (terrainNow - terrainBase) : baseAlt;
     elevationDisplay.innerText = Math.max(0, Math.floor(displayAlt));
 
-    // 觸發單張照片卡片
     photoFeatures.forEach((f, i) => {
         if (!shownPhotos.has(f.properties.id)) {
             if (turf.distance(point, f, { units: 'kilometers' }) < 0.1) {
@@ -200,11 +198,7 @@ function updateDisplay(dist) {
 
     const config = speedConfigs[currentSpeedIndex];
     map.easeTo({ 
-        center: coords, 
-        zoom: config.zoom, 
-        pitch: config.pitch,
-        offset: [175, 0], // 閃避左側卡片
-        duration: 100 
+        center: coords, zoom: config.zoom, pitch: config.pitch, offset: [175, 0], duration: 100 
     });
 }
 
@@ -216,52 +210,50 @@ function showPhotoCard(f, i) {
     photoCardTimeout = setTimeout(() => photoCard.classList.add('hidden'), 3000);
 }
 
-// --- 5. 最終綜覽畫面邏輯 ---
+// --- 5. 最終綜覽畫面 ---
+// 修正：讓照片緊貼藍色點點旁邊
+function getOffsetPhotoPosition(map, lonLat, index) {
+    // 使用經緯度微調，這會確保無論縮放層級如何，照片都保持在點位附近的比例
+    const lngOffset = (index % 2 === 0) ? 0.0005 : -0.0005; // 左右交替偏移
+    const latOffset = 0.0008; // 向上偏移一點點，避免遮住點
 
-// 計算偏移位置，避免蓋住原本的路徑
-function getOffsetPhotoPosition(map, lonLat) {
-    const pixel = map.project(lonLat);
-    const offsetPixel = { x: pixel.x + 35, y: pixel.y - 35 }; // 向右上方偏移
-    return map.unproject(offsetPixel);
+    return [lonLat[0] + lngOffset, lonLat[1] + latOffset];
 }
 
 function showFinalSummary() {
     finalPopups.forEach(p => p.remove());
     finalPopups = [];
 
-    // 1. 生成所有照片的綜覽彈窗
-    photoFeatures.forEach(f => {
-        // 使用偏移坐標，讓線條露出來
-        const offsetCoords = getOffsetPhotoPosition(map, f.geometry.coordinates);
+    photoFeatures.forEach((f, i) => {
+        const offsetCoords = getOffsetPhotoPosition(map, f.geometry.coordinates, i);
 
         const popup = new maplibregl.Popup({ 
             closeButton: false, 
-            maxWidth: '100px', 
+            maxWidth: '120px', 
             anchor: 'center',
-            className: 'final-summary-popup' // 套用去背 CSS
+            className: 'final-summary-popup' 
         })
             .setLngLat(offsetCoords)
             .setHTML(`
-                <div style="border: 2px solid white; border-radius: 4px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.4);">
-                    <img src="${f.properties.objectUrl}" style="width:100%; display: block;">
+                <div style="border: 2px solid white; border-radius: 4px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.4); background: white;">
+                    <img src="${f.properties.objectUrl}" style="width:100%; display: block; object-fit: cover; height: 70px;">
                 </div>
             `)
             .addTo(map);
         finalPopups.push(popup);
     });
 
-    // 2. 自動縮放到全局視角，並閃避左側卡片
     if (routeLine) {
         const bbox = turf.bbox(routeLine);
         map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
-            padding: { left: 450, right: 100, top: 100, bottom: 100 }, 
+            padding: { left: 450, right: 120, top: 120, bottom: 120 }, 
             pitch: 0,
-            duration: 2000
+            duration: 2500
         });
     }
 }
 
-// --- 6. 動態播放控制 ---
+// --- 6. 播放邏輯 ---
 function animate(timestamp) {
     if (!isPlaying) return;
     if (!lastTime) lastTime = timestamp;
@@ -277,7 +269,7 @@ function animate(timestamp) {
         isPlaying = false;
         toggleButtons();
         updateDisplay(currentDistance);
-        setTimeout(showFinalSummary, 800); // 動畫結束觸發綜覽
+        setTimeout(showFinalSummary, 800);
         return;
     }
 
@@ -314,19 +306,8 @@ if (speedBtn) {
     speedBtn.addEventListener('click', () => {
         currentSpeedIndex = (currentSpeedIndex + 1) % speedConfigs.length;
         const config = speedConfigs[currentSpeedIndex];
-        
-        speedBtn.title = config.label;
         iconContainer.innerHTML = `<i data-lucide="${config.icon}" class="w-5 h-5 stroke-[1.5]"></i>`;
         lucide.createIcons();
-        
-        map.flyTo({ 
-            zoom: config.zoom, 
-            pitch: config.pitch, 
-            offset: [175, 0],
-            duration: 1000 
-        });
-        
-        speedBtn.classList.add('scale-90');
-        setTimeout(() => speedBtn.classList.remove('scale-90'), 100);
+        map.flyTo({ zoom: config.zoom, pitch: config.pitch, offset: [175, 0], duration: 1000 });
     });
 }
