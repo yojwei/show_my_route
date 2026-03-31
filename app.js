@@ -14,6 +14,7 @@ let activePopup = null;
 let photoCardTimeout = null;
 let photoDateRange = { min: null, max: null };
 let photoDisplayPoints = [];
+let finalPopups = []; // 用於存放結尾生成的彈出視窗，方便清除
 
 // --- DOM 元件 ---
 const photoCard = document.getElementById('photo-card');
@@ -31,7 +32,6 @@ const escHtml = (str) => {
 };
 
 // --- 1. 地圖初始化 ---
-
 initMap();
 
 function initMap() {
@@ -61,7 +61,7 @@ function initMap() {
       ],
       terrain: { source: 'terrain-source', exaggeration: 1.5 }
     },
-    center: [120.9738, 23.9756], // 臺灣中心
+    center: [120.9738, 23.9756],
     zoom: 7.5,
     pitch: 0,
     bearing: 0
@@ -156,7 +156,6 @@ function initMap() {
       }
     });
 
-    // 群集點擊放大
     const expandCluster = async (e) => {
       const features = map.queryRenderedFeatures(e.point, { layers: ['photo-clusters', 'photo-cluster-count'] });
       if (!features.length) return;
@@ -173,7 +172,6 @@ function initMap() {
     map.on('click', 'photo-clusters', expandCluster);
     map.on('click', 'photo-cluster-count', expandCluster);
 
-    // 照片標記點擊彈出圖卡
     map.on('click', 'photo-markers', (e) => {
       const props = e.features[0].properties;
       const coords = e.features[0].geometry.coordinates.slice();
@@ -202,7 +200,6 @@ function initMap() {
 }
 
 // --- 2. 照片上傳處理 ---
-
 const uploadInput = document.getElementById('photo-upload');
 
 if (uploadInput) {
@@ -238,6 +235,9 @@ if (uploadInput) {
     );
 
     if (activePopup) activePopup.remove();
+    finalPopups.forEach(p => p.remove());
+    finalPopups = [];
+
     photoFeatures.forEach(f => URL.revokeObjectURL(f.properties.objectUrl));
     photoDisplayPoints.forEach(p => p.objectUrl && URL.revokeObjectURL(p.objectUrl));
 
@@ -259,7 +259,7 @@ if (uploadInput) {
           id: `photo-${i}`,
           name: m.name,
           time: m.time,
-          objectUrl
+          objectUrl: objectUrl
         }
       });
     });
@@ -327,7 +327,6 @@ function updateRoute(coords) {
   document.getElementById('route-subtitle').innerText = `包含 ${coords.length} 個點位`;
 }
 
-// 顯示右側照片卡
 function showPhotoCard(feature, index) {
   if (!photoCard) return;
   photoCardImg.src = feature.properties.objectUrl;
@@ -340,7 +339,52 @@ function showPhotoCard(feature, index) {
   }, 3500);
 }
 
-// 動畫更新顯示
+// 新增功能: 計算不遮蓋路徑的偏移經緯度
+function getOffsetPhotoPosition(map, lonLat) {
+    const pixel = map.project(lonLat);
+    // 向右上方偏移，避免蓋住原本的點與線
+    const offsetPixel = { x: pixel.x + 45, y: pixel.y - 45 };
+    return map.unproject(offsetPixel);
+}
+
+// 新增功能: 顯示最終結算畫面 (顯示所有照片圖卡 + 自動縮放)
+function showFinalSummary() {
+    if (photoFeatures.length === 0) return;
+
+    // 先清除之前的彈窗
+    finalPopups.forEach(p => p.remove());
+    finalPopups = [];
+
+    // 遍歷所有照片，生成圖卡
+    photoFeatures.forEach((f) => {
+        const offsetCoords = getOffsetPhotoPosition(map, f.geometry.coordinates);
+        
+        const popup = new maplibregl.Popup({ 
+            closeButton: false, 
+            closeOnClick: false,
+            maxWidth: '120px',
+            offset: [0, 0]
+        })
+            .setLngLat(offsetCoords)
+            .setHTML(`
+                <div style="border: 2px solid white; border-radius: 6px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.4);">
+                    <img src="${f.properties.objectUrl}" style="width: 100%; display: block; object-fit: cover; height: 80px;">
+                </div>
+            `)
+            .addTo(map);
+        finalPopups.push(popup);
+    });
+
+    // 自動縮放到適合大小，包含所有點與照片
+    const bbox = turf.bbox(routeLine);
+    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
+        padding: 120, // 增加邊距以容納偏移後的照片圖卡
+        duration: 2500,
+        pitch: 0,     // 回到平面視角以便觀看全貌
+        bearing: 0
+    });
+}
+
 function updateDisplay(dist) {
   const point = turf.along(routeLine, dist, { units: 'kilometers' });
   const progressLine = turf.lineSlice(turf.point(routeLine.geometry.coordinates[0]), point, routeLine);
@@ -352,20 +396,20 @@ function updateDisplay(dist) {
   const elev = map.queryTerrainElevation ? map.queryTerrainElevation(point.geometry.coordinates) : null;
   elevationDisplay.innerText = Number.isFinite(elev) ? Math.floor(elev) : '---';
 
-  // --- 照片跳出偵測 ---
   photoFeatures.forEach((f, i) => {
     if (!shownPhotos.has(f.properties.id)) {
       const d = turf.distance(point, f, { units: 'kilometers' });
-      if (d < 0.15) { // 距離小於 150 公尺即觸發
+      if (d < 0.15) {
         shownPhotos.add(f.properties.id);
         showPhotoCard(f, i);
       }
     }
   });
 
+  // 動畫進行中的動態視角
   map.easeTo({
     center: point.geometry.coordinates,
-    zoom: 15,
+    zoom: 15.5,
     pitch: 65,
     duration: 100
   });
@@ -386,6 +430,9 @@ function animate(timestamp) {
     isPlaying = false;
     toggleButtons();
     updateDisplay(currentDistance);
+    
+    // --- 觸發結算畫面功能 ---
+    setTimeout(showFinalSummary, 800); 
     return;
   }
 
@@ -396,6 +443,11 @@ function animate(timestamp) {
 // 按鈕事件
 playBtn.addEventListener('click', () => {
   if (!routeLine) return alert('請先上傳照片');
+  
+  // 重啟時清除舊的圖卡
+  finalPopups.forEach(p => p.remove());
+  finalPopups = [];
+
   if (currentDistance >= totalDistance) {
     currentDistance = 0;
     shownPhotos.clear();
@@ -417,7 +469,7 @@ function toggleButtons() {
   pauseBtn.classList.toggle('hidden', !isPlaying);
 }
 
-// 截圖與下載邏輯 (修正版)
+// 截圖下載邏輯
 function formatDateSlash(date) {
     if (!date) return "";
     const y = date.getFullYear();
@@ -429,7 +481,7 @@ function formatDateSlash(date) {
 async function drawImageFromUrl(ctx, url, x, y, w, h) {
     return new Promise((resolve) => {
         const img = new Image();
-        img.crossOrigin = 'anonymous'; // 重要
+        img.crossOrigin = 'anonymous';
         img.onload = () => {
             ctx.drawImage(img, x, y, w, h);
             resolve();
@@ -442,7 +494,6 @@ async function drawImageFromUrl(ctx, url, x, y, w, h) {
 function getNonOverlappingPhotoPositions(map, points) {
     const placed = [];
     const size = 60;
-    const gap = 10;
     for (const p of points) {
         const proj = map.project([p.lon, p.lat]);
         let x = Math.round(proj.x - size / 2);
@@ -460,22 +511,18 @@ document.getElementById('share-btn').addEventListener('click', async () => {
         shareCanvas.height = mapCanvas.height;
         const ctx = shareCanvas.getContext('2d');
 
-        // 1. 繪製底圖
         ctx.drawImage(mapCanvas, 0, 0);
 
-        // 2. 繪製照片
         const displayPoints = getNonOverlappingPhotoPositions(map, photoDisplayPoints);
         for (const p of displayPoints) {
             ctx.save();
             ctx.strokeStyle = 'white';
             ctx.lineWidth = 3;
-            // 簡化為矩形框
             await drawImageFromUrl(ctx, p.objectUrl, p.x, p.y, 60, 60);
             ctx.strokeRect(p.x, p.y, 60, 60);
             ctx.restore();
         }
 
-        // 3. 繪製文字
         const routeName = routeTitle.innerText.trim() || "我的路徑";
         const dateText = (photoDateRange.min) ? `${formatDateSlash(photoDateRange.min)} - ${formatDateSlash(photoDateRange.max)}` : "日期不明";
         
@@ -488,7 +535,6 @@ document.getElementById('share-btn').addEventListener('click', async () => {
         ctx.font = "20px sans-serif";
         ctx.fillText(dateText, shareCanvas.width - 30, shareCanvas.height - 35);
 
-        // 4. 下載觸發
         const dataUrl = shareCanvas.toDataURL('image/png');
         const link = document.createElement('a');
         link.download = `${routeName}.png`;
@@ -498,6 +544,6 @@ document.getElementById('share-btn').addEventListener('click', async () => {
         document.body.removeChild(link);
     } catch (e) {
         console.error(e);
-        alert("下載失敗，請檢查地圖是否加載完成。");
+        alert("下載失敗");
     }
 });
