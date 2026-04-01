@@ -4,6 +4,7 @@ let routeLine = null;
 let totalDistance = 0;
 let currentDistance = 0;
 let isPlaying = false;
+let isPhotoPausing = false; // <--- 新增這行：記錄是否因為照片而暫停
 let animationId = null;
 let lastTime = 0;
 let photoFeatures = [];
@@ -231,28 +232,46 @@ function updateDisplay(dist) {
     }
     elevationDisplay.innerText = Math.max(0, Math.floor(finalAltitude));
 
-    photoFeatures.forEach((f, i) => {
+    // --- 替換這段 ---
+    let triggeredPhoto = false; // 新增一個標記，看這一幀有沒有觸發照片
+
+    for (let i = 0; i < photoFeatures.length; i++) {
+        const f = photoFeatures[i];
         if (!shownPhotos.has(f.properties.id) && turf.distance(point, f, { units: 'kilometers' }) < 0.15) {
             shownPhotos.add(f.properties.id);
             showPhotoCard(f, i);
+            triggeredPhoto = true; 
+            break; // <--- 關鍵加這行：一次只觸發一張，剩下的等這張的 2 秒暫停結束後，下一幀再來觸發！
         }
-    });
+    }
+
+    // 新增：如果觸發了照片，啟動 2 秒的暫停機制
+    if (triggeredPhoto) {
+        isPhotoPausing = true;
+        setTimeout(() => {
+            // 2 秒後，如果使用者沒有手動按暫停，就繼續播放
+            if (isPlaying) { 
+                isPhotoPausing = false;
+                lastTime = performance.now(); // 關鍵：重置時間差，避免地圖因為這 2 秒的落差而瞬間暴衝
+                animate(lastTime);
+            }
+        }, 2000); // 暫停 2000 毫秒 (2秒)
+    }
+    // --- 替換結束 ---
 
     const segConfig = getSegmentConfig(dist);
     const leftPad = window.innerWidth < 800 ? 50 : 450;
 
-    map.easeTo({ 
+    map.jumpTo({ 
         center: coords, 
         zoom: segConfig.zoom,
         pitch: segConfig.pitch,
-        padding: { left: leftPad },
-        duration: 300, 
-        essential: true
+        padding: { left: leftPad }
     });
 }
 
 function showPhotoCard(f, i) {
-    if (!isPlaying || (currentDistance / totalDistance) > 0.99) {
+    if (!isPlaying) {
         photoCard.classList.add('hidden');
         return;
     }
@@ -386,8 +405,10 @@ shareBtn.addEventListener('click', async () => {
 });
 
 // --- 6. 播放控制 ---
+// --- 替換整個 animate 函數 ---
 function animate(timestamp) {
-    if (!isPlaying) return;
+    if (!isPlaying || isPhotoPausing) return; // 新增：如果正在看照片，就凍結迴圈
+
     if (!lastTime) lastTime = timestamp;
     const delta = timestamp - lastTime;
     lastTime = timestamp;
@@ -420,7 +441,11 @@ function animate(timestamp) {
     }
     
     updateDisplay(currentDistance);
-    animationId = requestAnimationFrame(animate);
+    
+    // 新增：只有在沒被照片強制暫停時，才呼叫下一幀
+    if (!isPhotoPausing) {
+        animationId = requestAnimationFrame(animate);
+    }
 }
 
 playBtn.addEventListener('click', () => {
@@ -431,6 +456,7 @@ playBtn.addEventListener('click', () => {
         finalPopups.forEach(p => p.remove()); 
     }
     isPlaying = true;
+    isPhotoPausing = false; // <--- 新增這行：強制解除照片等待狀態
     lastTime = performance.now();
     toggleButtons();
     animate(lastTime);
