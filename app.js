@@ -161,6 +161,7 @@ async function updateRoute(coords) {
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
         padding: { left: leftPad, right: rightPad, top: 150, bottom: 100 },
         duration: 1500,
+        maxZoom: 18, // <--- 【新增這行】預覽全路線時保護解析度
         essential: true
     });
 }
@@ -189,7 +190,7 @@ function getSegmentConfig(dist) {
     } else if (segmentDist > 3) {
         targetSeconds = 2; finalZoom = 13; finalPitch = 50;
     } else if (segmentDist < 0.5) {
-        targetSeconds = 1.5; finalZoom = 18; finalPitch = 70;
+        targetSeconds = 1.5; finalZoom = 17; finalPitch = 70;
     } else {
         targetSeconds = 2; finalZoom = 15.5; finalPitch = 60;
     }
@@ -313,35 +314,76 @@ function clusterPoints(features, distanceKm) {
     return clusters;
 }
 
+// --- 替換整個 showFinalSummary 函數 ---
 function showFinalSummary() {
     if (finalPopups.length > 0) return;
     photoCard.classList.add('hidden');
 
     const clusters = clusterPoints(photoFeatures, 0.2);
 
-    clusters.forEach(cluster => {
-        const count = cluster.features.length;
+    // 1. 預先計算每個 cluster (群集點) 的「前進方位角」(Bearing)
+    const clusterBearings = clusters.map((cluster, index) => {
+        if (clusters.length < 2) return 0;
+        let p1, p2;
+        if (index === 0) {
+            p1 = turf.center(clusters[0]);
+            p2 = turf.center(clusters[1]);
+        } else if (index === clusters.length - 1) {
+            p1 = turf.center(clusters[index - 1]);
+            p2 = turf.center(clusters[index]);
+        } else {
+            p1 = turf.center(clusters[index - 1]);
+            p2 = turf.center(clusters[index + 1]);
+        }
+        return turf.bearing(p1, p2);
+    });
+
+    let globalZigzag = 0; 
+
+    clusters.forEach((cluster, clusterIndex) => {
         const center = turf.center(cluster).geometry.coordinates;
+        const routeBearing = clusterBearings[clusterIndex];
 
-        cluster.features.forEach((f, i) => {
-            const angle = (i / count) * 360;
+        const relativeAngles = [-90, 90, -45, 45, -135, 135, -180, 0];
+
+        cluster.features.forEach((f, featureIndex) => {
+            let offsetAngle;
+
+            if (cluster.features.length === 1) {
+                offsetAngle = (globalZigzag % 2 === 0) ? -90 : 90;
+                globalZigzag++;
+            } else {
+                offsetAngle = relativeAngles[featureIndex % relativeAngles.length];
+            }
+
+            const finalAngle = routeBearing + offsetAngle;
+
             const currentZoom = map.getZoom();
-            const radius = Math.pow(2, 16 - currentZoom) * 80; 
+            const radiusMultiplier = 1 + Math.floor(featureIndex / 2) * 0.4; 
+            const radius = Math.pow(2, 16 - currentZoom) * 90 * radiusMultiplier;
 
-            const dest = turf.destination(turf.point(center), radius / 1000, angle, { units: 'kilometers' });
+            const dest = turf.destination(turf.point(center), radius / 1000, finalAngle, { units: 'kilometers' });
             const finalLngLat = dest.geometry.coordinates;
 
+            // 移除了 HTML 結構中的 connection-line，只保留乾淨的圖片與陰影
             const popup = new maplibregl.Popup({
                 closeButton: false,
                 closeOnClick: false,
                 anchor: 'center',
-                className: 'final-summary-popup radial-popup'
+                className: 'final-summary-popup'
             })
             .setLngLat(finalLngLat)
             .setHTML(`
-                <div class="summary-img-container" style="animation-delay: ${i * 0.1}s">
-                    <img src="${f.properties.objectUrl}" style="width:120px; height:90px; object-fit:cover;">
-                    <div class="connection-line" style="transform: rotate(${angle + 90}deg); width: ${radius}px;"></div>
+                <div class="summary-img-container" style="animation-delay: ${globalZigzag * 0.05}s; position: relative; z-index: 2;">
+                    <img src="${f.properties.objectUrl}" style="
+                        width: 180px; 
+                        height: 135px; 
+                        object-fit: cover; 
+                        border: 2px solid white;
+                        border-radius: 6px; 
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+                        display: block;
+                    ">
                 </div>
             `)
             .addTo(map);
@@ -430,6 +472,7 @@ function animate(timestamp) {
         map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
             padding: { left: 150, right: 150, top: 150, bottom: 150 }, 
             duration: 2000,
+            maxZoom: 18, // <--- 【新增這行】結尾綜覽時保護解析度
             essential: true
         });
 
@@ -448,18 +491,57 @@ function animate(timestamp) {
     }
 }
 
+// --- 替換整個 playBtn 事件監聽器 ---
 playBtn.addEventListener('click', () => {
     if (!routeLine) return alert('請先上傳照片');
-    if (currentDistance >= totalDistance) { 
+    
+    // 判斷是否為「從頭開始」播放
+    const isStartingFromBeginning = currentDistance >= totalDistance || currentDistance === 0;
+
+    if (isStartingFromBeginning) { 
         currentDistance = 0; 
         shownPhotos.clear(); 
         finalPopups.forEach(p => p.remove()); 
     }
+
     isPlaying = true;
-    isPhotoPausing = false; // <--- 新增這行：強制解除照片等待狀態
-    lastTime = performance.now();
+    isPhotoPausing = false; // 強制解除照片等待狀態
     toggleButtons();
-    animate(lastTime);
+
+    if (isStartingFromBeginning) {
+        // --- 1. 順滑飛向起點邏輯 ---
+        const startCoord = routeLine.coordinates[0];
+        const segConfig = getSegmentConfig(0);
+        const leftPad = window.innerWidth < 800 ? 50 : 450;
+
+        // 先把藍點移到起點，讓畫面有準備出發的感覺 (不改變相機視角)
+        map.getSource('point').setData(turf.along(routeLine, 0, { units: 'kilometers' }));
+        distanceDisplay.innerText = "0.00";
+
+        // 發動平滑位移
+        map.flyTo({
+            center: startCoord,
+            zoom: segConfig.zoom,
+            pitch: segConfig.pitch,
+            padding: { left: leftPad },
+            speed: 1.2,  // 調整數值可改變飛行快慢
+            curve: 1.4,  // 飛行的拋物線弧度
+            essential: true
+        });
+
+        // 2. 綁定「飛行結束」事件：等降落後才開始播動畫
+        map.once('moveend', () => {
+            // 如果兩秒飛行期間使用者反悔按了暫停，就不啟動動畫
+            if (!isPlaying) return; 
+            lastTime = performance.now();
+            animate(lastTime);
+        });
+
+    } else {
+        // --- 從暫停中恢復，直接繼續動畫 ---
+        lastTime = performance.now();
+        animate(lastTime);
+    }
 });
 
 pauseBtn.addEventListener('click', () => {
