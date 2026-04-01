@@ -11,10 +11,11 @@ let shownPhotos = new Set();
 let finalPopups = []; 
 let photoCardTimeout = null;
 
-// --- 新增：分段導覽配置函數 ---
+// --- 優化版：分段導覽配置函數 (目標時間制) ---
 function getSegmentConfig(dist) {
-    if (!routeLine || photoFeatures.length < 2) return { speed: 200, zoom: 15, pitch: 60 };
+    if (!routeLine || photoFeatures.length < 2) return { speed: 400, zoom: 15, pitch: 60 };
 
+    // 1. 找出目前在哪兩個照片點之間
     let currentIndex = 0;
     for (let i = 0; i < photoFeatures.length; i++) {
         const photoDist = turf.length(turf.lineSlice(turf.point(routeLine.coordinates[0]), photoFeatures[i], routeLine), { units: 'kilometers' });
@@ -24,22 +25,51 @@ function getSegmentConfig(dist) {
 
     const p1 = photoFeatures[currentIndex];
     const p2 = photoFeatures[currentIndex + 1];
-    if (!p2) return { speed: 150, zoom: 15, pitch: 60 }; 
+    
+    // 抵達終點段的預設
+    if (!p2) return { speed: 100, zoom: 15, pitch: 60 }; 
 
+    // 2. 計算此路段的地理距離 (公里)
     const segmentDist = turf.distance(p1, p2, { units: 'kilometers' });
 
-    // --- 調整後的 A-B-C-D 節奏 ---
-    if (segmentDist > 5) {      
-        // 長距離：時速提到 600-800km/h 才有「飛越」感
-        return { speed: 600, zoom: 12, pitch: 45 }; 
-    } else if (segmentDist < 1) { 
-        // 短距離：時速 80km/h (市區開車感)，Zoom In 到 17.5 看到街道
-        return { speed: 80, zoom: 17.5, pitch: 65 }; 
-    } else {                    
-        // 中距離：時速 250km/h
-        return { speed: 250, zoom: 15, pitch: 55 }; 
+    // 3. 【核心邏輯】設定每個路段「應該跑幾秒」
+    let targetSeconds;
+    let finalZoom;
+    let finalPitch;
+
+    if (segmentDist > 10) {      
+        // 極長距離 (例如跨城市)：設定 3 秒跑完，視角拉高 (Zoom 10)
+        targetSeconds = 3;
+        finalZoom = 10;
+        finalPitch = 40;
+    } else if (segmentDist > 3) {
+        // 中長距離：2 秒跑完
+        targetSeconds = 2;
+        finalZoom = 13;
+        finalPitch = 50;
+    } else if (segmentDist < 0.5) {
+        // 極短距離 (例如巷弄)：至少給 1.5 秒才不會閃過，視角拉近 (Zoom 18)
+        targetSeconds = 1.5;
+        finalZoom = 18;
+        finalPitch = 70;
+    } else {
+        // 一般距離：2 秒跑完
+        targetSeconds = 2;
+        finalZoom = 15.5;
+        finalPitch = 60;
     }
+
+    // 4. 自動計算需要的「虛擬時速」 (距離 / 小時)
+    // 公式：(公里 / 秒) * 3600 = 時速
+    const calculatedSpeed = (segmentDist / targetSeconds) * 3600;
+
+    return { 
+        speed: calculatedSpeed, 
+        zoom: finalZoom, 
+        pitch: finalPitch 
+    };
 }
+
 // --- DOM 元件 ---
 const uploadInput = document.getElementById('photo-upload');
 const photoCard = document.getElementById('photo-card');
@@ -187,7 +217,7 @@ async function updateRoute(coords) {
     const leftPad = window.innerWidth < 800 ? 100 : 300;
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
         padding: { left: leftPad, right: 100, top: 100, bottom: 100 },
-        duration: 1500
+        duration: 200
     });
 }
 
@@ -242,7 +272,7 @@ function updateDisplay(dist) {
         zoom: segConfig.zoom,    // 根據 A-B-C-D 路段自動變化的縮放
         pitch: segConfig.pitch,  // 自動變化的傾斜度
         padding: { left: leftPad }, 
-        duration: 300,           // 增加緩動時間，讓 Zoom 切換時變平滑
+        duration: 800,           // 增加緩動時間，讓 Zoom 切換時變平滑
         essential: true
     });
 }
