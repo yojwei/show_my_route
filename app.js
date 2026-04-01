@@ -11,65 +11,6 @@ let shownPhotos = new Set();
 let finalPopups = []; 
 let photoCardTimeout = null;
 
-// --- 優化版：分段導覽配置函數 (目標時間制) ---
-function getSegmentConfig(dist) {
-    if (!routeLine || photoFeatures.length < 2) return { speed: 400, zoom: 15, pitch: 60 };
-
-    // 1. 找出目前在哪兩個照片點之間
-    let currentIndex = 0;
-    for (let i = 0; i < photoFeatures.length; i++) {
-        const photoDist = turf.length(turf.lineSlice(turf.point(routeLine.coordinates[0]), photoFeatures[i], routeLine), { units: 'kilometers' });
-        if (photoDist <= dist) currentIndex = i;
-        else break;
-    }
-
-    const p1 = photoFeatures[currentIndex];
-    const p2 = photoFeatures[currentIndex + 1];
-    
-    // 抵達終點段的預設
-    if (!p2) return { speed: 100, zoom: 15, pitch: 60 }; 
-
-    // 2. 計算此路段的地理距離 (公里)
-    const segmentDist = turf.distance(p1, p2, { units: 'kilometers' });
-
-    // 3. 【核心邏輯】設定每個路段「應該跑幾秒」
-    let targetSeconds;
-    let finalZoom;
-    let finalPitch;
-
-    if (segmentDist > 10) {      
-        // 極長距離 (例如跨城市)：設定 3 秒跑完，視角拉高 (Zoom 10)
-        targetSeconds = 3;
-        finalZoom = 10;
-        finalPitch = 40;
-    } else if (segmentDist > 3) {
-        // 中長距離：2 秒跑完
-        targetSeconds = 2;
-        finalZoom = 13;
-        finalPitch = 50;
-    } else if (segmentDist < 0.5) {
-        // 極短距離 (例如巷弄)：至少給 1.5 秒才不會閃過，視角拉近 (Zoom 18)
-        targetSeconds = 1.5;
-        finalZoom = 18;
-        finalPitch = 70;
-    } else {
-        // 一般距離：2 秒跑完
-        targetSeconds = 2;
-        finalZoom = 15.5;
-        finalPitch = 60;
-    }
-
-    // 4. 自動計算需要的「虛擬時速」 (距離 / 小時)
-    // 公式：(公里 / 秒) * 3600 = 時速
-    const calculatedSpeed = (segmentDist / targetSeconds) * 3600;
-
-    return { 
-        speed: calculatedSpeed, 
-        zoom: finalZoom, 
-        pitch: finalPitch 
-    };
-}
-
 // --- DOM 元件 ---
 const uploadInput = document.getElementById('photo-upload');
 const photoCard = document.getElementById('photo-card');
@@ -81,7 +22,6 @@ const playBtn = document.getElementById('play-btn');
 const pauseBtn = document.getElementById('pause-btn');
 const shareBtn = document.getElementById('share-btn');
 const routeTitle = document.getElementById('route-title');
-const iconContainer = document.getElementById('speed-icon-container');
 
 // --- 1. 初始化邏輯 ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -93,7 +33,7 @@ function initMap() {
     map = new maplibregl.Map({
         container: 'map',
         attributionControl: false,
-        preserveDrawingBuffer: true, // 必須開啟以支援截圖
+        preserveDrawingBuffer: true,
         style: {
             version: 8,
             glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
@@ -142,7 +82,7 @@ function setupLayers() {
     map.addLayer({ id: 'photo-markers', type: 'circle', source: 'photos', paint: { 'circle-radius': 8, 'circle-color': '#bfdbfe', 'circle-stroke-width': 2, 'circle-stroke-color': '#60a5fa' } });
 }
 
-// --- 2. 照片處理 ---
+// --- 2. 照片處理與路徑生成 ---
 if (uploadInput) uploadInput.addEventListener('change', handleUpload);
 
 async function handleUpload(e) {
@@ -214,14 +154,49 @@ async function updateRoute(coords) {
     map.getSource('route').setData(routeLine);
     
     const bbox = turf.bbox(routeLine);
-    const leftPad = window.innerWidth < 800 ? 100 : 300;
+    const leftPad = window.innerWidth < 800 ? 50 : 450; 
+    const rightPad = window.innerWidth < 800 ? 50 : 150;
+
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
-        padding: { left: leftPad, right: 100, top: 100, bottom: 100 },
-        duration: 200
+        padding: { left: leftPad, right: rightPad, top: 150, bottom: 100 },
+        duration: 1500,
+        essential: true
     });
 }
 
-// --- 3. 動態與顯示 (整合海拔模擬) ---
+// --- 3. 視角計算與動態顯示 ---
+function getSegmentConfig(dist) {
+    if (!routeLine || photoFeatures.length < 2) return { speed: 400, zoom: 15, pitch: 60 };
+
+    let currentIndex = 0;
+    for (let i = 0; i < photoFeatures.length; i++) {
+        const photoDist = turf.length(turf.lineSlice(turf.point(routeLine.coordinates[0]), photoFeatures[i], routeLine), { units: 'kilometers' });
+        if (photoDist <= dist) currentIndex = i;
+        else break;
+    }
+
+    const p1 = photoFeatures[currentIndex];
+    const p2 = photoFeatures[currentIndex + 1];
+    
+    if (!p2) return { speed: 100, zoom: 15, pitch: 60 }; 
+
+    const segmentDist = turf.distance(p1, p2, { units: 'kilometers' });
+    let targetSeconds, finalZoom, finalPitch;
+
+    if (segmentDist > 10) {      
+        targetSeconds = 3; finalZoom = 10; finalPitch = 40;
+    } else if (segmentDist > 3) {
+        targetSeconds = 2; finalZoom = 13; finalPitch = 50;
+    } else if (segmentDist < 0.5) {
+        targetSeconds = 1.5; finalZoom = 18; finalPitch = 70;
+    } else {
+        targetSeconds = 2; finalZoom = 15.5; finalPitch = 60;
+    }
+
+    const calculatedSpeed = (segmentDist / targetSeconds) * 3600;
+    return { speed: calculatedSpeed, zoom: finalZoom, pitch: finalPitch };
+}
+
 function updateDisplay(dist) {
     if (!routeLine) return;
     const point = turf.along(routeLine, dist, { units: 'kilometers' });
@@ -232,7 +207,6 @@ function updateDisplay(dist) {
     map.getSource('point').setData(point);
     distanceDisplay.innerText = dist.toFixed(2);
 
-    // --- 海拔模擬核心 ---
     const currentTerrainAlt = map.queryTerrainElevation(coords) || 0;
     let prevPhoto = null, nextPhoto = null;
 
@@ -265,79 +239,123 @@ function updateDisplay(dist) {
     });
 
     const segConfig = getSegmentConfig(dist);
-    const leftPad = window.innerWidth < 800 ? 0 : 250;
+    const leftPad = window.innerWidth < 800 ? 50 : 450;
 
     map.easeTo({ 
         center: coords, 
-        zoom: segConfig.zoom,    // 根據 A-B-C-D 路段自動變化的縮放
-        pitch: segConfig.pitch,  // 自動變化的傾斜度
-        padding: { left: leftPad }, 
-        duration: 800,           // 增加緩動時間，讓 Zoom 切換時變平滑
+        zoom: segConfig.zoom,
+        pitch: segConfig.pitch,
+        padding: { left: leftPad },
+        duration: 300, 
         essential: true
     });
 }
 
 function showPhotoCard(f, i) {
+    if (!isPlaying || (currentDistance / totalDistance) > 0.99) {
+        photoCard.classList.add('hidden');
+        return;
+    }
+
     photoCardImg.src = f.properties.objectUrl;
-    photoCardLabel.innerText = `照片 #${i+1}`;
-    photoCard.classList.remove('hidden');
+    photoCardLabel.innerText = `照片 #${i + 1}`;
+    
     clearTimeout(photoCardTimeout);
-    photoCardTimeout = setTimeout(() => photoCard.classList.add('hidden'), 3500);
+    photoCard.classList.remove('hidden');
+
+    photoCardTimeout = setTimeout(() => {
+        photoCard.classList.add('hidden');
+    }, 3500);
 }
 
-// --- 4. 最終綜覽 ---
+// --- 4. 最終綜覽模組 ---
+// 補回遺失的叢集演算法
+function clusterPoints(features, distanceKm) {
+    const clusters = [];
+    const usedIndices = new Set();
+
+    for (let i = 0; i < features.length; i++) {
+        if (usedIndices.has(i)) continue;
+        
+        const cluster = { type: 'FeatureCollection', features: [features[i]] };
+        usedIndices.add(i);
+
+        for (let j = i + 1; j < features.length; j++) {
+            if (usedIndices.has(j)) continue;
+            
+            const dist = turf.distance(features[i], features[j], { units: 'kilometers' });
+            if (dist <= distanceKm) {
+                cluster.features.push(features[j]);
+                usedIndices.add(j);
+            }
+        }
+        clusters.push(cluster);
+    }
+    return clusters;
+}
+
 function showFinalSummary() {
-    finalPopups.forEach(p => p.remove());
-    finalPopups = [];
+    if (finalPopups.length > 0) return;
+    photoCard.classList.add('hidden');
 
-    photoFeatures.forEach((f) => {
-        const popup = new maplibregl.Popup({ closeButton: false, maxWidth: '120px', className: 'final-summary-popup' })
-            .setLngLat([f.geometry.coordinates[0], f.geometry.coordinates[1] + 0.01])
-            .setHTML(`<div><img src="${f.properties.objectUrl}"></div>`)
+    const clusters = clusterPoints(photoFeatures, 0.2);
+
+    clusters.forEach(cluster => {
+        const count = cluster.features.length;
+        const center = turf.center(cluster).geometry.coordinates;
+
+        cluster.features.forEach((f, i) => {
+            const angle = (i / count) * 360;
+            const currentZoom = map.getZoom();
+            const radius = Math.pow(2, 16 - currentZoom) * 80; 
+
+            const dest = turf.destination(turf.point(center), radius / 1000, angle, { units: 'kilometers' });
+            const finalLngLat = dest.geometry.coordinates;
+
+            const popup = new maplibregl.Popup({
+                closeButton: false,
+                closeOnClick: false,
+                anchor: 'center',
+                className: 'final-summary-popup radial-popup'
+            })
+            .setLngLat(finalLngLat)
+            .setHTML(`
+                <div class="summary-img-container" style="animation-delay: ${i * 0.1}s">
+                    <img src="${f.properties.objectUrl}" style="width:120px; height:90px; object-fit:cover;">
+                    <div class="connection-line" style="transform: rotate(${angle + 90}deg); width: ${radius}px;"></div>
+                </div>
+            `)
             .addTo(map);
-        finalPopups.push(popup);
-    });
 
-    const bbox = turf.bbox(routeLine);
-    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
-        padding: { left: window.innerWidth < 800 ? 50 : 300, right: 100, top: 100, bottom: 100 }, 
-        pitch: 0, duration: 2500
+            finalPopups.push(popup);
+        });
     });
 }
 
-// --- 5. 截圖下載功能 (所見即所得版) ---
+// --- 5. 截圖下載功能 ---
 shareBtn.addEventListener('click', async () => {
     if (!routeLine) return alert('請先產生路徑並進入綜覽畫面');
 
-    // 顯示讀取狀態 (選配)
     shareBtn.disabled = true;
     const originalBtnText = shareBtn.innerHTML;
     shareBtn.innerText = "截圖生成中...";
 
     try {
-        // 使用 html2canvas 捕捉整個地圖容器 (包含 HTML Popups)
         const mapContainer = document.getElementById('map');
-        
         const canvas = await html2canvas(mapContainer, {
-            useCORS: true,           // 允許跨域圖片 (衛星圖)
+            useCORS: true,           
             allowTaint: true,
-            scale: 2,                // 提升清晰度 (2倍解析度)
-            ignoreElements: (el) => {
-                // 排除地圖縮放按鈕或其他 UI 控件
-                return el.classList.contains('maplibregl-ctrl');
-            }
+            scale: 2,                
+            ignoreElements: (el) => el.classList.contains('maplibregl-ctrl')
         });
 
-        // 建立一個臨時繪圖層來加上標題與日期
         const finalCanvas = document.createElement('canvas');
         finalCanvas.width = canvas.width;
         finalCanvas.height = canvas.height;
         const ctx = finalCanvas.getContext('2d');
 
-        // 1. 畫上地圖與照片的截圖
         ctx.drawImage(canvas, 0, 0);
 
-        // 2. 加上右下角文字浮水印 (這部分與原本邏輯一致，但調整座標以適應高解析度)
         const name = routeTitle.innerText.trim() || "我的旅程路徑";
         const dates = photoFeatures.map(f => f.properties.time).filter(t => t);
         const dateText = dates.length ? `${dates[0]} - ${dates[dates.length-1]}` : "";
@@ -347,14 +365,12 @@ shareBtn.addEventListener('click', async () => {
         ctx.shadowBlur = 15;
         ctx.textAlign = "right";
         
-        // 根據 scale 調整字體大小
         ctx.font = "bold 60px 'Microsoft JhengHei', sans-serif";
         ctx.fillText(name, finalCanvas.width - 60, finalCanvas.height - 120);
         
         ctx.font = "40px 'Microsoft JhengHei', sans-serif";
         ctx.fillText(dateText, finalCanvas.width - 60, finalCanvas.height - 60);
 
-        // 3. 下載
         const link = document.createElement('a');
         link.download = `${name}.png`;
         link.href = finalCanvas.toDataURL('image/png');
@@ -376,8 +392,8 @@ function animate(timestamp) {
     const delta = timestamp - lastTime;
     lastTime = timestamp;
 
-    const config = getSegmentConfig(currentDistance); // 取得當前路段配置
-    const kmPerMs = config.speed / 3600000;           // 將時速轉為毫秒位移
+    const config = getSegmentConfig(currentDistance); 
+    const kmPerMs = config.speed / 3600000;           
     currentDistance += kmPerMs * delta;
 
     if (currentDistance >= totalDistance) {
@@ -385,9 +401,24 @@ function animate(timestamp) {
         isPlaying = false;
         toggleButtons();
         updateDisplay(currentDistance);
-        setTimeout(showFinalSummary, 1200);
+
+        clearTimeout(photoCardTimeout);
+        photoCard.classList.add('hidden'); 
+
+        const bbox = turf.bbox(routeLine);
+        map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
+            padding: { left: 150, right: 150, top: 150, bottom: 150 }, 
+            duration: 2000,
+            essential: true
+        });
+
+        map.once('moveend', () => {
+            photoCard.classList.add('hidden'); 
+            showFinalSummary();
+        });
         return;
     }
+    
     updateDisplay(currentDistance);
     animationId = requestAnimationFrame(animate);
 }
