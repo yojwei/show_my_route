@@ -263,10 +263,21 @@ function updateDisplay(dist) {
     const segConfig = getSegmentConfig(dist);
     const leftPad = window.innerWidth < 800 ? 50 : 450;
 
+    // 防呆：如果相機狀態尚未初始化，先抓取地圖現有狀態
+    if (currentCameraZoom === null) currentCameraZoom = map.getZoom();
+    if (currentCameraPitch === null) currentCameraPitch = map.getPitch();
+
+    // 關鍵魔法：線性插值 (Lerp)
+    // 讓相機「目前數值」逐漸往「目標數值 (segConfig)」靠近
+    // 0.05 是一個平滑係數，數值越小 (例如 0.02) 運鏡越慢、越柔和；數值越大 (例如 0.1) 反應越快。
+    currentCameraZoom += (segConfig.zoom - currentCameraZoom) * 0.05;
+    currentCameraPitch += (segConfig.pitch - currentCameraPitch) * 0.05;
+
+    // 將平滑計算後的值餵給地圖
     map.jumpTo({ 
         center: coords, 
-        zoom: segConfig.zoom,
-        pitch: segConfig.pitch,
+        zoom: currentCameraZoom,
+        pitch: currentCameraPitch,
         padding: { left: leftPad }
     });
 }
@@ -531,6 +542,8 @@ playBtn.addEventListener('click', () => {
 
         // 2. 綁定「飛行結束」事件：等降落後才開始播動畫
         map.once('moveend', () => {
+            currentCameraZoom = map.getZoom();
+            currentCameraPitch = map.getPitch();
             // 如果兩秒飛行期間使用者反悔按了暫停，就不啟動動畫
             if (!isPlaying) return; 
             lastTime = performance.now();
