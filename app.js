@@ -182,18 +182,17 @@ async function loadAllPhotosAsIcons() {
             img.onload = () => {
                 const date = photo.properties.time || "Unknown Date";
                 const polaroidCanvas = createPolaroidImage(img, date);
+                
+                // 將 Canvas 轉為 ImageData 並存入地圖，這樣 final-photo-layer 才抓得到圖
                 const ctx = polaroidCanvas.getContext('2d');
-                // 直接把 Canvas 轉成純粹的像素陣列
                 const imageData = ctx.getImageData(0, 0, polaroidCanvas.width, polaroidCanvas.height);
-
                 const iconName = `polaroid-${photo.properties.index}`;
-
+                
                 if (map.hasImage(iconName)) map.removeImage(iconName);
-                // 把像素陣列丟給地圖，完美避開尺寸判斷 bug
                 map.addImage(iconName, imageData);
-                resolve();
+                resolve(); // 記得要 resolve
             };
-            img.onerror = () => resolve(); // 避免單張圖片錯誤卡死整個迴圈
+            img.onerror = () => resolve(); 
         });
     }
 }
@@ -577,19 +576,46 @@ function animate(timestamp) {
         isPlaying = false;
         toggleButtons();
 
+        // 👇 【關鍵新增】強制重繪機制
+        // 為了防止影片在靜止畫面時自己卡掉，我們強迫地圖每 33 毫秒更新一次畫布 (約 30 FPS)
+        let repaintInterval = null;
+        if (isRecordingVideo) {
+            repaintInterval = setInterval(() => {
+                if (map) map.triggerRepaint();
+            }, 33); 
+        }
+
+        // 1. 先讓地圖飛回總覽範圍 (包含整條路線)
         const bbox = turf.bbox(routeLine);
         map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
             padding: { left: 150, right: 150, top: 150, bottom: 150 }, 
-            duration: 2000,
-            maxZoom: 18, 
+            duration: 2500, // 飛回總覽需要 2.5 秒
             essential: true
         });
 
+        // 2. 當地圖「飛到位置」後觸發
         map.once('moveend', () => {
-            showFinalSummary();        
-            if (isRecordingVideo && mediaRecorder && mediaRecorder.state !== 'inactive') {
-                setTimeout(() => mediaRecorder.stop(), 1000); 
-            }
+            
+            // 地圖停穩後，先等 0.5 秒緩衝
+            setTimeout(() => {
+                
+                showFinalSummary(); // 【正式在畫布上顯示所有照片】
+                
+                // 3. 照片顯示後，如果是錄影模式，多錄幾秒再切斷
+                if (isRecordingVideo && mediaRecorder && mediaRecorder.state !== 'inactive') {
+                    
+                    // 這裡決定「生成的影片」最後要停留多久
+                    setTimeout(() => {
+                        
+                        mediaRecorder.stop(); // 🎬 正式停止錄影並下載
+                        
+                        // 👇 【關鍵新增】錄影結束後，記得把強制重繪關掉，釋放效能
+                        if (repaintInterval) clearInterval(repaintInterval);
+                        
+                    }, 6000); // 10000 代表照片出現後，強制錄製 6 秒
+                }
+
+            }, 500); 
         });
         return;
     }
@@ -668,7 +694,7 @@ if (downloadVideoBtn) {
 
 function startVideoRecording() {
     const canvas = map.getCanvas();
-    const stream = canvas.captureStream(30); 
+    const stream = canvas.captureStream(60); 
     
     let options = { mimeType: 'video/webm; codecs=vp9' };
     if (!MediaRecorder.isTypeSupported(options.mimeType)) {
