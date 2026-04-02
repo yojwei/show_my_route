@@ -4,24 +4,19 @@ let routeLine = null;
 let totalDistance = 0;
 let currentDistance = 0;
 let isPlaying = false;
-let isPhotoPausing = false; // <--- 新增這行：記錄是否因為照片而暫停
+let isPhotoPausing = false; 
 let animationId = null;
 let lastTime = 0;
 let photoFeatures = [];
 let shownPhotos = new Set();
-let finalPopups = []; 
-let photoCardTimeout = null;
 let currentCameraZoom = null;
 let currentCameraPitch = null;
-let mediaRecorder = null; // <--- 新增：為錄製影片功能
-let recordedChunks = []; // <--- 新增：為錄製影片功能
-let isRecordingVideo = false; // <--- 新增：為錄製影片功能
+let mediaRecorder = null; 
+let recordedChunks = []; 
+let isRecordingVideo = false; 
 
 // --- DOM 元件 ---
 const uploadInput = document.getElementById('photo-upload');
-const photoCard = document.getElementById('photo-card');
-const photoCardImg = document.getElementById('photo-card-img');
-const photoCardLabel = document.getElementById('photo-card-label');
 const distanceDisplay = document.getElementById('distance-display');
 const elevationDisplay = document.getElementById('elevation-display');
 const playBtn = document.getElementById('play-btn');
@@ -82,19 +77,137 @@ function setupLayers() {
     map.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
     map.addLayer({ id: 'route-preview', type: 'line', source: 'route', paint: { 'line-color': '#fff', 'line-width': 2, 'line-dasharray': [2, 2], 'line-opacity': 0.5 } });
     map.addSource('route-progress', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
-    map.addLayer({ id: 'route-progress', type: 'line', source: 'route-progress', paint: { 'line-color': '#3b82f6', 'line-width': 6, 'line-cap': 'round' } });
+    map.addLayer({ 
+    id: 'route-progress', 
+    type: 'line', 
+    source: 'route-progress', 
+    layout: {
+        'line-cap': 'round',
+        'line-join': 'round'
+    },
+    paint: { 
+        'line-color': '#3b82f6', 
+        'line-width': 6 
+    } 
+});
     map.addSource('point', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [] } } });
     map.addLayer({ id: 'point-circle', type: 'circle', source: 'point', paint: { 'circle-radius': 8, 'circle-color': '#fff', 'circle-stroke-width': 3, 'circle-stroke-color': '#3b82f6' } });
     map.addSource('photos', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({ id: 'photo-markers', type: 'circle', source: 'photos', paint: { 'circle-radius': 8, 'circle-color': '#bfdbfe', 'circle-stroke-width': 2, 'circle-stroke-color': '#60a5fa' } });
+
+    // 👇 新增：動畫途中的彈出照片圖層
+    map.addSource('active-photo', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({
+        id: 'photo-layer',
+        type: 'symbol',
+        source: 'active-photo',
+        layout: {
+            'icon-image': ['get', 'iconName'],
+            'icon-size': 0.6, // 這裡可以調整彈出照片的大小
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true,
+            'icon-offset': [0, -120] // 往上偏移，避免擋住藍色圓點
+        }
+    });
+
+    // 👇 新增：最終總覽畫面的群集照片圖層
+    map.addSource('final-photos', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({
+        id: 'final-photo-layer',
+        type: 'symbol',
+        source: 'final-photos',
+        layout: {
+            'icon-image': ['get', 'iconName'],
+            'icon-size': 0.45, // 總覽畫面的照片稍小一點
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true
+        }
+    });
 }
 
-// --- 2. 照片處理與路徑生成 ---
+// --- 2. 照片處理、拍立得合成與路徑生成 ---
 if (uploadInput) uploadInput.addEventListener('change', handleUpload);
+
+/**
+ * 將圖片與日期文字合成一張拍立得風格的圖片 (Canvas)
+ */
+function createPolaroidImage(imgElement, dateText) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const w = 400;
+    const h = 480; // 拍立得下方要留白寫字
+    canvas.width = w;
+    canvas.height = h;
+
+    // 1. 畫白色背景與陰影
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = 'rgba(0,0,0,0.4)';
+    ctx.shadowBlur = 15;
+    ctx.fillRect(15, 15, w - 30, h - 30);
+
+    // 2. 畫照片 (處理 object-fit: cover 的置中裁切邏輯)
+    const photoW = w - 60;
+    const photoH = photoW; 
+    const imgRatio = imgElement.naturalWidth / imgElement.naturalHeight;
+    let sX = 0, sY = 0, sW = imgElement.naturalWidth, sH = imgElement.naturalHeight;
+    
+    if (imgRatio > 1) { // 橫圖
+        sW = sH;
+        sX = (imgElement.naturalWidth - sW) / 2;
+    } else { // 直圖
+        sH = sW;
+        sY = (imgElement.naturalHeight - sH) / 2;
+    }
+    
+    ctx.shadowBlur = 0; // 照片本體不需要陰影
+    ctx.drawImage(imgElement, sX, sY, sW, sH, 30, 30, photoW, photoH);
+
+    // 3. 寫日期文字
+    ctx.fillStyle = '#333333';
+    ctx.font = 'bold 24px "Courier New", Courier, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(dateText, w / 2, h - 45);
+
+    return canvas;
+}
+
+// 預先將所有照片轉換為 MapLibre Icon
+async function loadAllPhotosAsIcons() {
+    for (let i = 0; i < photoFeatures.length; i++) {
+        const photo = photoFeatures[i];
+        const img = new Image();
+        img.src = photo.properties.objectUrl;
+
+        await new Promise(resolve => {
+            img.onload = () => {
+                const date = photo.properties.time || "Unknown Date";
+                const polaroidCanvas = createPolaroidImage(img, date);
+                const ctx = polaroidCanvas.getContext('2d');
+                // 直接把 Canvas 轉成純粹的像素陣列
+                const imageData = ctx.getImageData(0, 0, polaroidCanvas.width, polaroidCanvas.height);
+
+                const iconName = `polaroid-${photo.properties.index}`;
+
+                if (map.hasImage(iconName)) map.removeImage(iconName);
+                // 把像素陣列丟給地圖，完美避開尺寸判斷 bug
+                map.addImage(iconName, imageData);
+                resolve();
+            };
+            img.onerror = () => resolve(); // 避免單張圖片錯誤卡死整個迴圈
+        });
+    }
+}
 
 async function handleUpload(e) {
     const files = Array.from(e.target.files);
     if (!files.length) return;
+
+    // 清除舊資料
+    photoFeatures.forEach(f => URL.revokeObjectURL(f.properties.objectUrl));
+    if (map.getSource('active-photo')) map.getSource('active-photo').setData({ type: 'FeatureCollection', features: [] });
+    if (map.getSource('final-photos')) map.getSource('final-photos').setData({ type: 'FeatureCollection', features: [] });
+    photoFeatures = [];
+    shownPhotos.clear();
 
     const metadata = await Promise.all(files.map(file => {
         return new Promise(resolve => {
@@ -124,12 +237,6 @@ async function handleUpload(e) {
         });
     }));
 
-    photoFeatures.forEach(f => URL.revokeObjectURL(f.properties.objectUrl));
-    finalPopups.forEach(p => p.remove());
-    finalPopups = [];
-    photoFeatures = [];
-    shownPhotos.clear();
-
     metadata.forEach((m, i) => {
         if (!m.coords) return;
         photoFeatures.push({
@@ -139,8 +246,14 @@ async function handleUpload(e) {
         });
     });
 
+    // 依時間排序並賦予固定的 index 供後續存取 Icon 使用
     photoFeatures.sort((a, b) => new Date(a.properties.time) - new Date(b.properties.time));
+    photoFeatures.forEach((f, i) => f.properties.index = i);
+
     map.getSource('photos').setData({ type: 'FeatureCollection', features: photoFeatures });
+
+    // 開始將照片轉為地圖 Icon
+    await loadAllPhotosAsIcons();
 
     const coords = photoFeatures.map(f => f.geometry.coordinates);
     if (coords.length >= 2) await updateRoute(coords);
@@ -159,11 +272,10 @@ async function updateRoute(coords) {
     totalDistance = turf.length(routeLine, { units: 'kilometers' });
     currentDistance = 0;
 
-    // 👇 確保預先計算的里程數，絕對不會因為小數點誤差大於 totalDistance
     photoFeatures.forEach(f => {
         const sliced = turf.lineSlice(turf.point(routeLine.coordinates[0]), f, routeLine);
         const dist = turf.length(sliced, { units: 'kilometers' });
-        f.properties.routeDistance = Math.min(dist, totalDistance); // 加入 Math.min 防呆
+        f.properties.routeDistance = Math.min(dist, totalDistance); 
     });
 
     map.getSource('route').setData(routeLine);
@@ -186,7 +298,6 @@ function getSegmentConfig(dist) {
 
     let currentIndex = 0;
     for (let i = 0; i < photoFeatures.length; i++) {
-        // 👇 直接比對剛剛算好的里程數，不需再每幀切割路線
         if (photoFeatures[i].properties.routeDistance <= dist) currentIndex = i;
         else break;
     }
@@ -227,7 +338,6 @@ function updateDisplay(dist) {
     let prevPhoto = null, nextPhoto = null;
 
     for (let i = 0; i < photoFeatures.length; i++) {
-        // 👇 效能優化，改用預先算好的里程
         if (photoFeatures[i].properties.routeDistance <= dist) prevPhoto = photoFeatures[i];
         else { nextPhoto = photoFeatures[i]; break; }
     }
@@ -251,10 +361,9 @@ function updateDisplay(dist) {
 
     for (let i = 0; i < photoFeatures.length; i++) {
         const f = photoFeatures[i];
-        // 👇 【關鍵修復】只要「當前距離 >= 照片距離」就一定觸發，不再用直線距離抓瞎
         if (!shownPhotos.has(f.properties.id) && dist >= f.properties.routeDistance) {
             shownPhotos.add(f.properties.id);
-            showPhotoCard(f, i);
+            showPhotoCard(f);
             triggeredPhoto = true; 
             break; 
         }
@@ -263,6 +372,9 @@ function updateDisplay(dist) {
     if (triggeredPhoto) {
         isPhotoPausing = true;
         setTimeout(() => {
+            // 隱藏目前顯示的照片
+            map.getSource('active-photo').setData({ type: 'FeatureCollection', features: [] });
+            
             if (isPlaying) { 
                 isPhotoPausing = false;
                 lastTime = performance.now(); 
@@ -288,25 +400,20 @@ function updateDisplay(dist) {
     });
 }
 
-function showPhotoCard(f, i) {
-    if (!isPlaying) {
-        photoCard.classList.add('hidden');
-        return;
-    }
-
-    photoCardImg.src = f.properties.objectUrl;
-    photoCardLabel.innerText = `照片 #${i + 1}`;
-    
-    clearTimeout(photoCardTimeout);
-    photoCard.classList.remove('hidden');
-
-    photoCardTimeout = setTimeout(() => {
-        photoCard.classList.add('hidden');
-    }, 3500);
+// 改用 MapLibre Native Layer 顯示彈出照片
+function showPhotoCard(f) {
+    if (!isPlaying) return;
+    map.getSource('active-photo').setData({
+        type: 'FeatureCollection',
+        features: [{
+            type: 'Feature',
+            geometry: f.geometry,
+            properties: { iconName: `polaroid-${f.properties.index}` }
+        }]
+    });
 }
 
 // --- 4. 最終綜覽模組 ---
-// 補回遺失的叢集演算法
 function clusterPoints(features, distanceKm) {
     const clusters = [];
     const usedIndices = new Set();
@@ -331,14 +438,12 @@ function clusterPoints(features, distanceKm) {
     return clusters;
 }
 
-// --- 替換整個 showFinalSummary 函數 ---
 function showFinalSummary() {
-    if (finalPopups.length > 0) return;
-    photoCard.classList.add('hidden');
+    // 確保只執行一次
+    if (map.getSource('final-photos')._data.features.length > 0) return;
+    map.getSource('active-photo').setData({ type: 'FeatureCollection', features: [] });
 
     const clusters = clusterPoints(photoFeatures, 0.2);
-
-    // 1. 預先計算每個 cluster (群集點) 的「前進方位角」(Bearing)
     const clusterBearings = clusters.map((cluster, index) => {
         if (clusters.length < 2) return 0;
         let p1, p2;
@@ -356,16 +461,15 @@ function showFinalSummary() {
     });
 
     let globalZigzag = 0; 
+    const finalFeatures = [];
 
     clusters.forEach((cluster, clusterIndex) => {
         const center = turf.center(cluster).geometry.coordinates;
         const routeBearing = clusterBearings[clusterIndex];
-
         const relativeAngles = [-90, 90, -45, 45, -135, 135, -180, 0];
 
         cluster.features.forEach((f, featureIndex) => {
             let offsetAngle;
-
             if (cluster.features.length === 1) {
                 offsetAngle = (globalZigzag % 2 === 0) ? -90 : 90;
                 globalZigzag++;
@@ -374,7 +478,6 @@ function showFinalSummary() {
             }
 
             const finalAngle = routeBearing + offsetAngle;
-
             const currentZoom = map.getZoom();
             const radiusMultiplier = 1 + Math.floor(featureIndex / 2) * 0.4; 
             const radius = Math.pow(2, 16 - currentZoom) * 90 * radiusMultiplier;
@@ -382,32 +485,17 @@ function showFinalSummary() {
             const dest = turf.destination(turf.point(center), radius / 1000, finalAngle, { units: 'kilometers' });
             const finalLngLat = dest.geometry.coordinates;
 
-            // 移除了 HTML 結構中的 connection-line，只保留乾淨的圖片與陰影
-            const popup = new maplibregl.Popup({
-                closeButton: false,
-                closeOnClick: false,
-                anchor: 'center',
-                className: 'final-summary-popup'
-            })
-            .setLngLat(finalLngLat)
-            .setHTML(`
-                <div class="summary-img-container" style="animation-delay: ${globalZigzag * 0.05}s; position: relative; z-index: 2;">
-                    <img src="${f.properties.objectUrl}" style="
-                        width: 180px; 
-                        height: 135px; 
-                        object-fit: cover; 
-                        border: 2px solid white;
-                        border-radius: 6px; 
-                        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-                        display: block;
-                    ">
-                </div>
-            `)
-            .addTo(map);
-
-            finalPopups.push(popup);
+            // 將照片加入最終圖層資料庫
+            finalFeatures.push({
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: finalLngLat },
+                properties: { iconName: `polaroid-${f.properties.index}` }
+            });
         });
     });
+
+    // 渲染最終的拍立得群集
+    map.getSource('final-photos').setData({ type: 'FeatureCollection', features: finalFeatures });
 }
 
 // --- 5. 截圖下載功能 ---
@@ -475,28 +563,20 @@ function animate(timestamp) {
     const kmPerMs = config.speed / 3600000;           
     currentDistance += kmPerMs * delta;
 
-    // 判斷是否已經抵達終點
     let isEnd = false;
     if (currentDistance >= totalDistance) {
         currentDistance = totalDistance;
         isEnd = true;
     }
     
-    // 更新畫面 (如果抵達終點，這裡會觸發最後一張照片並把 isPhotoPausing 設為 true)
     updateDisplay(currentDistance);
 
-    // 【關鍵修改】：如果觸發了照片，就算是到了終點也先 return 暫停！
-    // 等 updateDisplay 裡面的 2 秒 setTimeout 結束後喚醒，才會繼續往下走
-    if (isPhotoPausing) {
-        return; 
-    }
+    if (isPhotoPausing) return; 
 
-    // 當沒有在看照片，且已經抵達終點時，才開始播放結尾動畫
     if (isEnd) {
         isPlaying = false;
         toggleButtons();
 
-        // 移除原本強制馬上隱藏 photoCard 的程式碼，讓照片自然過渡
         const bbox = turf.bbox(routeLine);
         map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
             padding: { left: 150, right: 150, top: 150, bottom: 150 }, 
@@ -505,13 +585,9 @@ function animate(timestamp) {
             essential: true
         });
 
-        // 等到相機拉遠結束後，再隱藏照片並顯示綜覽圖示
         map.once('moveend', () => {
-            photoCard.classList.add('hidden'); 
             showFinalSummary();        
-            // 👇 【新增這段】：當抵達終點、鏡頭拉遠結束後，自動停止錄影！
             if (isRecordingVideo && mediaRecorder && mediaRecorder.state !== 'inactive') {
-                // 延遲 1 秒停止，確保最後的「總覽照片群」有被錄進影片裡
                 setTimeout(() => mediaRecorder.stop(), 1000); 
             }
         });
@@ -521,56 +597,50 @@ function animate(timestamp) {
     animationId = requestAnimationFrame(animate);
 }
 
-// --- 替換整個 playBtn 事件監聽器 ---
 playBtn.addEventListener('click', () => {
     if (!routeLine) return alert('請先上傳照片');
     
-    // 判斷是否為「從頭開始」播放
     const isStartingFromBeginning = currentDistance >= totalDistance || currentDistance === 0;
 
     if (isStartingFromBeginning) { 
         currentDistance = 0; 
         shownPhotos.clear(); 
-        finalPopups.forEach(p => p.remove()); 
+        // 清空畫面上的彈出與總覽圖層
+        map.getSource('active-photo').setData({ type: 'FeatureCollection', features: [] });
+        map.getSource('final-photos').setData({ type: 'FeatureCollection', features: [] });
     }
 
     isPlaying = true;
-    isPhotoPausing = false; // 強制解除照片等待狀態
+    isPhotoPausing = false; 
     toggleButtons();
 
     if (isStartingFromBeginning) {
-        // --- 1. 順滑飛向起點邏輯 ---
         const startCoord = routeLine.coordinates[0];
         const segConfig = getSegmentConfig(0);
         const leftPad = window.innerWidth < 800 ? 50 : 450;
 
-        // 先把藍點移到起點，讓畫面有準備出發的感覺 (不改變相機視角)
         map.getSource('point').setData(turf.along(routeLine, 0, { units: 'kilometers' }));
         distanceDisplay.innerText = "0.00";
 
-        // 發動平滑位移
         map.flyTo({
             center: startCoord,
             zoom: segConfig.zoom,
             pitch: segConfig.pitch,
             padding: { left: leftPad },
-            speed: 1.2,  // 調整數值可改變飛行快慢
-            curve: 1.4,  // 飛行的拋物線弧度
+            speed: 1.2,  
+            curve: 1.4,  
             essential: true
         });
 
-        // 2. 綁定「飛行結束」事件：等降落後才開始播動畫
         map.once('moveend', () => {
             currentCameraZoom = map.getZoom();
             currentCameraPitch = map.getPitch();
-            // 如果兩秒飛行期間使用者反悔按了暫停，就不啟動動畫
             if (!isPlaying) return; 
             lastTime = performance.now();
             animate(lastTime);
         });
 
     } else {
-        // --- 從暫停中恢復，直接繼續動畫 ---
         lastTime = performance.now();
         animate(lastTime);
     }
@@ -591,18 +661,15 @@ function toggleButtons() {
 if (downloadVideoBtn) {
     downloadVideoBtn.addEventListener('click', () => {
         if (!routeLine) return alert('請先產生路徑再錄製影片');
-        if (isRecordingVideo) return; // 避免重複點擊
-
+        if (isRecordingVideo) return; 
         startVideoRecording();
     });
 }
 
 function startVideoRecording() {
     const canvas = map.getCanvas();
-    // 擷取地圖畫布，設定為 30 FPS
     const stream = canvas.captureStream(30); 
     
-    // 預設輸出 webm 格式 (瀏覽器原生支援度最好)
     let options = { mimeType: 'video/webm; codecs=vp9' };
     if (!MediaRecorder.isTypeSupported(options.mimeType)) {
         options = { mimeType: 'video/webm' };
@@ -611,14 +678,10 @@ function startVideoRecording() {
     mediaRecorder = new MediaRecorder(stream, options);
     recordedChunks = [];
 
-    // 當錄製到資料時，推入陣列
     mediaRecorder.ondataavailable = function(e) {
-        if (e.data.size > 0) {
-            recordedChunks.push(e.data);
-        }
+        if (e.data.size > 0) recordedChunks.push(e.data);
     };
 
-    // 錄影停止時的處理 (輸出檔案)
     mediaRecorder.onstop = function() {
         const blob = new Blob(recordedChunks, { type: 'video/webm' });
         const url = URL.createObjectURL(blob);
@@ -631,22 +694,19 @@ function startVideoRecording() {
         a.click();
         window.URL.revokeObjectURL(url);
         
-        // 恢復按鈕狀態
         downloadVideoBtn.classList.remove('text-red-500', 'animate-pulse');
         isRecordingVideo = false;
     };
 
-    // 開始錄影
     mediaRecorder.start();
     isRecordingVideo = true;
-    
-    // 讓按鈕閃爍變紅，提示正在錄影
     downloadVideoBtn.classList.add('text-red-500', 'animate-pulse');
 
-    // === 以下為「強制從頭播放」的邏輯 ===
     currentDistance = 0; 
     shownPhotos.clear(); 
-    finalPopups.forEach(p => p.remove()); 
+    map.getSource('active-photo').setData({ type: 'FeatureCollection', features: [] });
+    map.getSource('final-photos').setData({ type: 'FeatureCollection', features: [] });
+    
     isPlaying = true;
     isPhotoPausing = false;
     toggleButtons();
@@ -672,7 +732,6 @@ function startVideoRecording() {
         currentCameraZoom = map.getZoom();
         currentCameraPitch = map.getPitch();
         if (!isPlaying) {
-            // 如果還沒開跑就按暫停，那就停止錄影
             mediaRecorder.stop();
             return; 
         }
