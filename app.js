@@ -11,6 +11,8 @@ let photoFeatures = [];
 let shownPhotos = new Set();
 let finalPopups = []; 
 let photoCardTimeout = null;
+let currentCameraZoom = null;
+let currentCameraPitch = null;
 
 // --- DOM 元件 ---
 const uploadInput = document.getElementById('photo-upload');
@@ -152,6 +154,14 @@ async function updateRoute(coords) {
 
     totalDistance = turf.length(routeLine, { units: 'kilometers' });
     currentDistance = 0;
+
+    // 👇 確保預先計算的里程數，絕對不會因為小數點誤差大於 totalDistance
+    photoFeatures.forEach(f => {
+        const sliced = turf.lineSlice(turf.point(routeLine.coordinates[0]), f, routeLine);
+        const dist = turf.length(sliced, { units: 'kilometers' });
+        f.properties.routeDistance = Math.min(dist, totalDistance); // 加入 Math.min 防呆
+    });
+
     map.getSource('route').setData(routeLine);
     
     const bbox = turf.bbox(routeLine);
@@ -161,7 +171,7 @@ async function updateRoute(coords) {
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
         padding: { left: leftPad, right: rightPad, top: 150, bottom: 100 },
         duration: 1500,
-        maxZoom: 18, // <--- 【新增這行】預覽全路線時保護解析度
+        maxZoom: 18, 
         essential: true
     });
 }
@@ -172,8 +182,8 @@ function getSegmentConfig(dist) {
 
     let currentIndex = 0;
     for (let i = 0; i < photoFeatures.length; i++) {
-        const photoDist = turf.length(turf.lineSlice(turf.point(routeLine.coordinates[0]), photoFeatures[i], routeLine), { units: 'kilometers' });
-        if (photoDist <= dist) currentIndex = i;
+        // 👇 直接比對剛剛算好的里程數，不需再每幀切割路線
+        if (photoFeatures[i].properties.routeDistance <= dist) currentIndex = i;
         else break;
     }
 
@@ -213,15 +223,15 @@ function updateDisplay(dist) {
     let prevPhoto = null, nextPhoto = null;
 
     for (let i = 0; i < photoFeatures.length; i++) {
-        const photoDist = turf.length(turf.lineSlice(turf.point(routeLine.coordinates[0]), photoFeatures[i], routeLine), { units: 'kilometers' });
-        if (photoDist <= dist) prevPhoto = photoFeatures[i];
+        // 👇 效能優化，改用預先算好的里程
+        if (photoFeatures[i].properties.routeDistance <= dist) prevPhoto = photoFeatures[i];
         else { nextPhoto = photoFeatures[i]; break; }
     }
 
     let finalAltitude = currentTerrainAlt;
     if (prevPhoto && nextPhoto) {
-        const d1 = turf.length(turf.lineSlice(turf.point(routeLine.coordinates[0]), prevPhoto, routeLine), { units: 'kilometers' });
-        const d2 = turf.length(turf.lineSlice(turf.point(routeLine.coordinates[0]), nextPhoto, routeLine), { units: 'kilometers' });
+        const d1 = prevPhoto.properties.routeDistance;
+        const d2 = nextPhoto.properties.routeDistance;
         const offset1 = (prevPhoto.properties.altitude || 0) - (map.queryTerrainElevation(prevPhoto.geometry.coordinates) || 0);
         const offset2 = (nextPhoto.properties.altitude || 0) - (map.queryTerrainElevation(nextPhoto.geometry.coordinates) || 0);
         const ratio = (dist - d1) / (d2 - d1);
@@ -233,47 +243,39 @@ function updateDisplay(dist) {
     }
     elevationDisplay.innerText = Math.max(0, Math.floor(finalAltitude));
 
-    // --- 替換這段 ---
-    let triggeredPhoto = false; // 新增一個標記，看這一幀有沒有觸發照片
+    let triggeredPhoto = false;
 
     for (let i = 0; i < photoFeatures.length; i++) {
         const f = photoFeatures[i];
-        if (!shownPhotos.has(f.properties.id) && turf.distance(point, f, { units: 'kilometers' }) < 0.15) {
+        // 👇 【關鍵修復】只要「當前距離 >= 照片距離」就一定觸發，不再用直線距離抓瞎
+        if (!shownPhotos.has(f.properties.id) && dist >= f.properties.routeDistance) {
             shownPhotos.add(f.properties.id);
             showPhotoCard(f, i);
             triggeredPhoto = true; 
-            break; // <--- 關鍵加這行：一次只觸發一張，剩下的等這張的 2 秒暫停結束後，下一幀再來觸發！
+            break; 
         }
     }
 
-    // 新增：如果觸發了照片，啟動 2 秒的暫停機制
     if (triggeredPhoto) {
         isPhotoPausing = true;
         setTimeout(() => {
-            // 2 秒後，如果使用者沒有手動按暫停，就繼續播放
             if (isPlaying) { 
                 isPhotoPausing = false;
-                lastTime = performance.now(); // 關鍵：重置時間差，避免地圖因為這 2 秒的落差而瞬間暴衝
+                lastTime = performance.now(); 
                 animate(lastTime);
             }
-        }, 2000); // 暫停 2000 毫秒 (2秒)
+        }, 2000); 
     }
-    // --- 替換結束 ---
 
     const segConfig = getSegmentConfig(dist);
     const leftPad = window.innerWidth < 800 ? 50 : 450;
 
-    // 防呆：如果相機狀態尚未初始化，先抓取地圖現有狀態
     if (currentCameraZoom === null) currentCameraZoom = map.getZoom();
     if (currentCameraPitch === null) currentCameraPitch = map.getPitch();
 
-    // 關鍵魔法：線性插值 (Lerp)
-    // 讓相機「目前數值」逐漸往「目標數值 (segConfig)」靠近
-    // 0.05 是一個平滑係數，數值越小 (例如 0.02) 運鏡越慢、越柔和；數值越大 (例如 0.1) 反應越快。
     currentCameraZoom += (segConfig.zoom - currentCameraZoom) * 0.05;
     currentCameraPitch += (segConfig.pitch - currentCameraPitch) * 0.05;
 
-    // 將平滑計算後的值餵給地圖
     map.jumpTo({ 
         center: coords, 
         zoom: currentCameraZoom,
@@ -458,9 +460,8 @@ shareBtn.addEventListener('click', async () => {
 });
 
 // --- 6. 播放控制 ---
-// --- 替換整個 animate 函數 ---
 function animate(timestamp) {
-    if (!isPlaying || isPhotoPausing) return; // 新增：如果正在看照片，就凍結迴圈
+    if (!isPlaying || isPhotoPausing) return;
 
     if (!lastTime) lastTime = timestamp;
     const delta = timestamp - lastTime;
@@ -470,23 +471,37 @@ function animate(timestamp) {
     const kmPerMs = config.speed / 3600000;           
     currentDistance += kmPerMs * delta;
 
+    // 判斷是否已經抵達終點
+    let isEnd = false;
     if (currentDistance >= totalDistance) {
         currentDistance = totalDistance;
+        isEnd = true;
+    }
+    
+    // 更新畫面 (如果抵達終點，這裡會觸發最後一張照片並把 isPhotoPausing 設為 true)
+    updateDisplay(currentDistance);
+
+    // 【關鍵修改】：如果觸發了照片，就算是到了終點也先 return 暫停！
+    // 等 updateDisplay 裡面的 2 秒 setTimeout 結束後喚醒，才會繼續往下走
+    if (isPhotoPausing) {
+        return; 
+    }
+
+    // 當沒有在看照片，且已經抵達終點時，才開始播放結尾動畫
+    if (isEnd) {
         isPlaying = false;
         toggleButtons();
-        updateDisplay(currentDistance);
 
-        clearTimeout(photoCardTimeout);
-        photoCard.classList.add('hidden'); 
-
+        // 移除原本強制馬上隱藏 photoCard 的程式碼，讓照片自然過渡
         const bbox = turf.bbox(routeLine);
         map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { 
             padding: { left: 150, right: 150, top: 150, bottom: 150 }, 
             duration: 2000,
-            maxZoom: 18, // <--- 【新增這行】結尾綜覽時保護解析度
+            maxZoom: 18, 
             essential: true
         });
 
+        // 等到相機拉遠結束後，再隱藏照片並顯示綜覽圖示
         map.once('moveend', () => {
             photoCard.classList.add('hidden'); 
             showFinalSummary();
@@ -494,12 +509,7 @@ function animate(timestamp) {
         return;
     }
     
-    updateDisplay(currentDistance);
-    
-    // 新增：只有在沒被照片強制暫停時，才呼叫下一幀
-    if (!isPhotoPausing) {
-        animationId = requestAnimationFrame(animate);
-    }
+    animationId = requestAnimationFrame(animate);
 }
 
 // --- 替換整個 playBtn 事件監聽器 ---
