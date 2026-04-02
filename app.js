@@ -13,6 +13,9 @@ let finalPopups = [];
 let photoCardTimeout = null;
 let currentCameraZoom = null;
 let currentCameraPitch = null;
+let mediaRecorder = null; // <--- 新增：為錄製影片功能
+let recordedChunks = []; // <--- 新增：為錄製影片功能
+let isRecordingVideo = false; // <--- 新增：為錄製影片功能
 
 // --- DOM 元件 ---
 const uploadInput = document.getElementById('photo-upload');
@@ -25,6 +28,7 @@ const playBtn = document.getElementById('play-btn');
 const pauseBtn = document.getElementById('pause-btn');
 const shareBtn = document.getElementById('share-btn');
 const routeTitle = document.getElementById('route-title');
+const downloadVideoBtn = document.getElementById('download-video-btn');
 
 // --- 1. 初始化邏輯 ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -504,7 +508,12 @@ function animate(timestamp) {
         // 等到相機拉遠結束後，再隱藏照片並顯示綜覽圖示
         map.once('moveend', () => {
             photoCard.classList.add('hidden'); 
-            showFinalSummary();
+            showFinalSummary();        
+            // 👇 【新增這段】：當抵達終點、鏡頭拉遠結束後，自動停止錄影！
+            if (isRecordingVideo && mediaRecorder && mediaRecorder.state !== 'inactive') {
+                // 延遲 1 秒停止，確保最後的「總覽照片群」有被錄進影片裡
+                setTimeout(() => mediaRecorder.stop(), 1000); 
+            }
         });
         return;
     }
@@ -576,4 +585,98 @@ pauseBtn.addEventListener('click', () => {
 function toggleButtons() {
     playBtn.classList.toggle('hidden', isPlaying);
     pauseBtn.classList.toggle('hidden', !isPlaying);
+}
+
+// --- 7. 下載影片功能 ---
+if (downloadVideoBtn) {
+    downloadVideoBtn.addEventListener('click', () => {
+        if (!routeLine) return alert('請先產生路徑再錄製影片');
+        if (isRecordingVideo) return; // 避免重複點擊
+
+        startVideoRecording();
+    });
+}
+
+function startVideoRecording() {
+    const canvas = map.getCanvas();
+    // 擷取地圖畫布，設定為 30 FPS
+    const stream = canvas.captureStream(30); 
+    
+    // 預設輸出 webm 格式 (瀏覽器原生支援度最好)
+    let options = { mimeType: 'video/webm; codecs=vp9' };
+    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+        options = { mimeType: 'video/webm' };
+    }
+
+    mediaRecorder = new MediaRecorder(stream, options);
+    recordedChunks = [];
+
+    // 當錄製到資料時，推入陣列
+    mediaRecorder.ondataavailable = function(e) {
+        if (e.data.size > 0) {
+            recordedChunks.push(e.data);
+        }
+    };
+
+    // 錄影停止時的處理 (輸出檔案)
+    mediaRecorder.onstop = function() {
+        const blob = new Blob(recordedChunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        const name = routeTitle ? routeTitle.innerText.trim() : "旅程紀錄";
+        a.download = `${name}.webm`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        
+        // 恢復按鈕狀態
+        downloadVideoBtn.classList.remove('text-red-500', 'animate-pulse');
+        isRecordingVideo = false;
+    };
+
+    // 開始錄影
+    mediaRecorder.start();
+    isRecordingVideo = true;
+    
+    // 讓按鈕閃爍變紅，提示正在錄影
+    downloadVideoBtn.classList.add('text-red-500', 'animate-pulse');
+
+    // === 以下為「強制從頭播放」的邏輯 ===
+    currentDistance = 0; 
+    shownPhotos.clear(); 
+    finalPopups.forEach(p => p.remove()); 
+    isPlaying = true;
+    isPhotoPausing = false;
+    toggleButtons();
+
+    const startCoord = routeLine.coordinates[0];
+    const segConfig = getSegmentConfig(0);
+    const leftPad = window.innerWidth < 800 ? 50 : 450;
+
+    map.getSource('point').setData(turf.along(routeLine, 0, { units: 'kilometers' }));
+    distanceDisplay.innerText = "0.00";
+
+    map.flyTo({
+        center: startCoord,
+        zoom: segConfig.zoom,
+        pitch: segConfig.pitch,
+        padding: { left: leftPad },
+        speed: 1.2,
+        curve: 1.4,
+        essential: true
+    });
+
+    map.once('moveend', () => {
+        currentCameraZoom = map.getZoom();
+        currentCameraPitch = map.getPitch();
+        if (!isPlaying) {
+            // 如果還沒開跑就按暫停，那就停止錄影
+            mediaRecorder.stop();
+            return; 
+        }
+        lastTime = performance.now();
+        animate(lastTime);
+    });
 }
