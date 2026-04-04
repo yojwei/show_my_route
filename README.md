@@ -65,7 +65,7 @@ python -m http.server 8080
 
 | 套件                                     | 版本  | 用途                             |
 | ---------------------------------------- | ----- | -------------------------------- |
-| [MapLibre GL JS](https://maplibre.org/)  | 2.4.0 | 3D 地圖渲染                      |
+| [MapLibre GL JS](https://maplibre.org/)  | 3.6.2 | 3D 地圖渲染                      |
 | [Turf.js](https://turfjs.org/)           | 6.x   | 地理空間計算（距離、方向、內插） |
 | [Tailwind CSS](https://tailwindcss.com/) | CDN   | UI 排版樣式                      |
 
